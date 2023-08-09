@@ -26,7 +26,7 @@ ENV PATH /opt/conda/envs/hyper-spec/bin:$PATH
 ENV CONDA_DEFAULT_ENV $hyper-spec
 
 # Clone the code
-RUN git clone https://github.com/wh-xu/Hyper-Spec.git 
+RUN git clone https://github.com/murbina05/Hyper-Spec.git 
 
 # set working dir
 WORKDIR /Hyper-Spec
