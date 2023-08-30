@@ -23,7 +23,7 @@ demo = gr.Interface(
         #gr.Radio(["1","2","3", "4", "5"])
         #gr.Radio(["1","2","3", "4", "5"])
         gr.Slider(0,1, label='Threshold eps value for clustering'),
-        gr.Radio(["CPU","GPU","FPGA"], label="Hardware")
+        gr.Radio(["CPU","GPU"], label="Hardware")
         ],
     outputs="text",
 )
