@@ -24,31 +24,48 @@ def main():
     print("works")
     #load_process_single("b1906_293T_proteinID_01A_QE3_122212.mgf")
 
+    #parses the mzml file and gives an MsmsSpectrum itereator 
+    for spectrum in read_mzml(query_filename):
+
+        # fp.write("BEGIN IONS\n")
+        # fp.write("TITLE=temp")  
+        # fp.write("SCANS=%s", spectrum.identifier)
+        # fp.write("") 
+
+        print("BEGIN IONS")
+        print("TITLE=not needed")
+        print("SCANS=%s" % spectrum.identifier)
+        print("PEPMAS=%s" % spectrum.precursor_mz)
+        print("RTINSECONDS=%s" % (float(spectrum.retention_time) * 1000))
+        print("CHARGE=%s+" % spectrum.precursor_charge)
 
 
-    read_spectra_list = []
-    for i, spectrum in enumerate(mzml.read(query_filename)):
-        print('\n Scan List: ', spectrum['scanList'])
+        for i in range(len(spectrum.mz)):
+            print("%s %s" % (spectrum.mz[i], spectrum.intensity[i]))
+
+    # read_spectra_list = []
+    # for i, spectrum in enumerate(mzml.read(query_filename)):
+    #     print('\n Scan List: ', spectrum['scanList'])
                 
-        #print(spectrum['m/z array'])
+    #     #print(spectrum['m/z array'])
 
-        #print(spectrum['intensity arrayu]'])
+    #     #print(spectrum['intensity arrayu]'])
 
-        #print(spectrum['MS1 spectrum'])
+    #     #print(spectrum['MS1 spectrum'])
 
-        print('\n Title:', spectrum['spectrum title'])
+    #     print('\n Title:', spectrum['spectrum title'])
 
-        #print('\n MS1 spectrum: ', spectrum['MS1 spectrum'])
+    #     #print('\n MS1 spectrum: ', spectrum['MS1 spectrum'])
 
-        print('\n Id: ', spectrum['id'])
+    #     print('\n Id: ', spectrum['id'])
 
-        print('\n Base Peak Intensity: ', spectrum['base peak intensity'])
+    #     print('\n Base Peak Intensity: ', spectrum['base peak intensity'])
 
-        print('\n Max mz: ', spectrum['highest observed m/z'])
+    #     print('\n Max mz: ', spectrum['highest observed m/z'])
 
-        print('\n Min mz: ', spectrum['lowest observed m/z'])
+    #     print('\n Min mz: ', spectrum['lowest observed m/z'])
 
-        # read_spectra_list.append([-1, ])
+    #     # read_spectra_list.append([-1, ])
         return
 
     print("done")
