@@ -1,7 +1,7 @@
-from utils import load_mgf_file 
+#from utils import load_mgf_file 
 from typing import Dict, IO, Iterator, List, Tuple, Union, Optional
 import tqdm
-from hd_preprocess import fast_mgf_parse, preprocess_read_spectra_list
+#from hd_preprocess import fast_mgf_parse, preprocess_read_spectra_list
 from spectrum_utils.spectrum import MsmsSpectrum
 from pyteomics import mgf, mzml, mzxml, parser
 import logging
@@ -15,16 +15,38 @@ import copy
 
 
 
-logger = logging.getLogger()
+#logger = logging.getLogger()
+
+def mzml_load:
+# read_spectra_list.append([
+#                         -1, charge, pepmass, 
+#                         filename, scans, rtinsecs, 
+#                         vector_to_array(mz, peak_i),
+#                         vector_to_array(intensity, peak_i)
+#                         ])
+    query_filename = "./13_b3t1_Pbt_Fe.mzML"
+    spectra_list = []
+    for spectrum in read_mzml(query_filename):
+
+        spectra_list.append([
+                            -1, spectrum.precursor_charge, spectrum.precursor_mz,
+                            query_filename, spectrum.identifier, spectrum.mz,
+                            spectrum.intensity])
+    
+    print(spectra_list)
 
 
 
-def main():
-    query_filename = "./VD10.mzML"
+
+
+def convert_mzml_m():
+    query_filename = "./13_b3t1_Pbt_Fe.mzML"
     print("works")
     #load_process_single("b1906_293T_proteinID_01A_QE3_122212.mgf")
+    # fp = open("test.txt", "w")
+    fp = open("./test.txt", "w")
 
-    #parses the mzml file and gives an MsmsSpectrum itereator 
+
     for spectrum in read_mzml(query_filename):
 
         # fp.write("BEGIN IONS\n")
@@ -32,16 +54,31 @@ def main():
         # fp.write("SCANS=%s", spectrum.identifier)
         # fp.write("") 
 
-        print("BEGIN IONS")
-        print("TITLE=not needed")
-        print("SCANS=%s" % spectrum.identifier)
-        print("PEPMAS=%s" % spectrum.precursor_mz)
-        print("RTINSECONDS=%s" % (float(spectrum.retention_time) * 1000))
-        print("CHARGE=%s+" % spectrum.precursor_charge)
+        # print("BEGIN IONS")
+        # print("TITLE=not needed")
+        # print("SCANS=%s" % spectrum.identifier)
+        # print("PEPMAS=%s" % spectrum.precursor_mz)
+        # print("RTINSECONDS=%s" % (float(spectrum.retention_time) * 1000))
+        # print("CHARGE=%s+" % spectrum.precursor_charge)
 
+
+        # for i in range(len(spectrum.mz)):
+        #     print("%s %s" % (spectrum.mz[i], spectrum.intensity[i]))
+        # print("END IONS")
+
+
+        fp.write("BEGIN IONS\n")
+        fp.write("TITLE=not needed\n")
+        fp.write("SCANS=%s\n" % spectrum.identifier)
+        fp.write("PEPMAS=%s\n" % spectrum.precursor_mz)
+        rtn_seconds = float(spectrum.retention_time) * 1000
+        fp.write("RTINSECONDS=%f\n" % rtn_seconds)
+        fp.write(("CHARGE=%s+\n" % spectrum.precursor_charge))
 
         for i in range(len(spectrum.mz)):
-            print("%s %s" % (spectrum.mz[i], spectrum.intensity[i]))
+            fp.write("%s %s\n" % (spectrum.mz[i], spectrum.intensity[i]))
+
+        fp.write("END IONS\n")
 
     # read_spectra_list = []
     # for i, spectrum in enumerate(mzml.read(query_filename)):
@@ -66,8 +103,8 @@ def main():
     #     print('\n Min mz: ', spectrum['lowest observed m/z'])
 
     #     # read_spectra_list.append([-1, ])
-        return
-
+    #     return
+    fp.close()
     print("done")
 
     
@@ -130,11 +167,8 @@ def read_mzml(source: Union[IO, str]) -> Iterator[MsmsSpectrum]:
     with mzml.MzML(source) as f_in:
         try:
             for i, spectrum in enumerate(f_in):
-                print("1")
                 if int(spectrum.get('ms level', -1)) == 2:
-                    print("2")
                     try:
-                        print("parsing")
                         parsed_spectrum = _parse_spectrum_mzml(spectrum)
                         parsed_spectrum.index = i
                         parsed_spectrum.is_processed = False
@@ -194,8 +228,9 @@ def _parse_spectrum_mzml(spectrum_dict: Dict) -> MsmsSpectrum:
         precursor_charge = int(precursor_ion['possible charge state'])
     else:
         precursor_charge = None
+
     spectrum = MsmsSpectrum(str(scan_nr), precursor_mz, precursor_charge,
-                            mz_array, intensity_array, None, retention_time)
+                            mz_array, intensity_array, retention_time)
 
     return spectrum
 
@@ -367,7 +402,3 @@ def verify_extension(supported_extensions: List[str], filename: str) -> None:
 
 
 
-
-
-if __name__ == "__main__":
-    main()
