@@ -17,7 +17,7 @@ import copy
 
 #logger = logging.getLogger()
 
-def mzml_load:
+def mzml_load():
 # read_spectra_list.append([
 #                         -1, charge, pepmass, 
 #                         filename, scans, rtinsecs, 
