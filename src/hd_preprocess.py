@@ -11,7 +11,7 @@ from joblib import Parallel, delayed
 
 from config import Config
 from utils import load_mgf_file, export_mgf_file
-from load_mzml import mzml_load
+from load_mzml import mzml_load, mzxml_load
 
 
 
@@ -541,8 +541,12 @@ def load_process_single(
     scaling: Optional[str] = 'off'
 ):
 
+    #mgf mzml mzxml
+
     if(file[-1 == "f"]):
         spec_list = fast_mgf_parse(file)
+    elif file[-3] == "x":
+        spec_list = mzxml_load(file)
     elif file[-1] == "l":
         spec_list = mzml_load(file)
 
