@@ -19,7 +19,7 @@ import pstats
 
 #logger = logging.getLogger()
 
-def mzml_load(filename):
+def mzxml_load(filename):
 # read_spectra_list.append([
 #                         -1, charge, pepmass, 
 #                         filename, scans, rtinsecs, 
@@ -35,8 +35,26 @@ def mzml_load(filename):
                             query_filename, spectrum.identifier, spectrum.mz,
                             spectrum.intensity])
     
-    print(spectra_list)
+    return spectra_list
 
+
+def mzml_load(filename):
+# read_spectra_list.append([
+#                         -1, charge, pepmass, 
+#                         filename, scans, rtinsecs, 
+#                         vector_to_array(mz, peak_i),
+#                         vector_to_array(intensity, peak_i)
+#                         ])
+    query_filename = filename
+    spectra_list = []
+    for spectrum in read_mzml(query_filename):
+
+        spectra_list.append([
+                            -1, spectrum.precursor_charge, spectrum.precursor_mz,
+                            query_filename, spectrum.identifier, spectrum.mz,
+                            spectrum.intensity])
+    
+    return spectra_list
 
 def convert_mzxml_mgf(filename):
     query_filename = filename
