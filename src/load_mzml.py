@@ -1,7 +1,7 @@
 #from utils import load_mgf_file 
 from typing import Dict, IO, Iterator, List, Tuple, Union, Optional
 import tqdm
-#from hd_preprocess import fast_mgf_parse, preprocess_read_spectra_list
+from hd_preprocess import fast_mgf_parse, preprocess_read_spectra_list
 from spectrum_utils.spectrum import MsmsSpectrum
 from pyteomics import mgf, mzml, mzxml, parser
 import logging
@@ -15,36 +15,46 @@ import copy
 import sys
 import cProfile
 import pstats
+import time
+from multiprocessing import Pool, TimeoutError
+
 
 
 #logger = logging.getLogger()
 
 def mzxml_load(filename):
-# read_spectra_list.append([
-#                         -1, charge, pepmass, 
-#                         filename, scans, rtinsecs, 
-#                         vector_to_array(mz, peak_i),
-#                         vector_to_array(intensity, peak_i)
-#                         ])
-    query_filename = filename
+    start = time.time()
     spectra_list = []
-    for spectrum in read_mzxml(query_filename):
+    with mzxml.MzXML(filename) as f_in:
+        try:
+            map_start = time.time()
 
-        spectra_list.append([
-                            -1, spectrum.precursor_charge, spectrum.precursor_mz,
-                            query_filename, spectrum.identifier, spectrum.mz,
-                            spectrum.intensity])
-    
+            # with Pool(processes = 8) as pool:
+
+            #     parsed_spectrum = pool.imap_unordered(_parse_spectrum_mzxml, f_in)
+            #     spectra_list =  pool.imap_unordered(appending, parsed_spectrum)
+
+            parsed_spectrum = map(_parse_spectrum_mzxml, f_in)
+            spectra_list = map(appending, parsed_spectrum, filename)
+            map_runtime = time.time() - map_start
+            print(spectra_list)
+            # for spectrum in parsed_spectrum:
+            #     spectra_list.append([
+            #                 -1, spectrum.precursor_charge, spectrum.precursor_mz,
+            #                 filename, spectrum.identifier, spectrum.mz,
+            #                 spectrum.intensity])
+        except LxmlError as e:
+            logger.warning('Failed to read file %s: %s', source, e)
+    print("new runtime: %s seconds" % (time.time() - start))
+    print("map runtime: %s seconds" % map_runtime)
     return spectra_list
 
+def appending(spectrum, filename):
+    return [-1, spectrum.precursor_charge, spectrum.precursor_mz,
+                            filename, spectrum.identifier, spectrum.mz,
+                            spectrum.intensity]
 
 def mzml_load(filename):
-# read_spectra_list.append([
-#                         -1, charge, pepmass, 
-#                         filename, scans, rtinsecs, 
-#                         vector_to_array(mz, peak_i),
-#                         vector_to_array(intensity, peak_i)
-#                         ])
     query_filename = filename
     spectra_list = []
     for spectrum in read_mzml(query_filename):
@@ -127,8 +137,6 @@ def convert_mzxml_mgf(filename):
 
 
 
-
-
 def convert_mzml_mgf(filename):
     query_filename = filename
     print("works")
@@ -136,7 +144,7 @@ def convert_mzml_mgf(filename):
     # fp = open("test.txt", "w")
     fp = open("./test.txt", "w")
 
-
+    
     for spectrum in read_mzml(query_filename):
 
         # fp.write("BEGIN IONS\n")
@@ -196,87 +204,9 @@ def convert_mzml_mgf(filename):
     #     return
     fp.close()
     print("done")
-
-
-def main():
-    query_filename = "./13_b3t1_Pbt_Fe.mzML"
-    print("works")
-    #load_process_single("b1906_293T_proteinID_01A_QE3_122212.mgf")
-    # fp = open("test.txt", "w")
-    fp = open("./test.txt", "w")
-
-
-    for spectrum in read_mzml(query_filename):
-
-        # fp.write("BEGIN IONS\n")
-        # fp.write("TITLE=temp")  
-        # fp.write("SCANS=%s", spectrum.identifier)
-        # fp.write("") 
-
-        # print("BEGIN IONS")
-        # print("TITLE=not needed")
-        # print("SCANS=%s" % spectrum.identifier)
-        # print("PEPMAS=%s" % spectrum.precursor_mz)
-        # print("RTINSECONDS=%s" % (float(spectrum.retention_time) * 1000))
-        # print("CHARGE=%s+" % spectrum.precursor_charge)
-
-
-        # for i in range(len(spectrum.mz)):
-        #     print("%s %s" % (spectrum.mz[i], spectrum.intensity[i]))
-        # print("END IONS")
-
-
-        fp.write("BEGIN IONS\n")
-        fp.write("TITLE=not needed\n")
-        fp.write("SCANS=%s\n" % spectrum.identifier)
-        fp.write("PEPMAS=%s\n" % spectrum.precursor_mz)
-        rtn_seconds = float(spectrum.retention_time) * 1000
-        fp.write("RTINSECONDS=%f\n" % rtn_seconds)
-        fp.write(("CHARGE=%s+\n" % spectrum.precursor_charge))
-
-        for i in range(len(spectrum.mz)):
-            fp.write("%s %s\n" % (spectrum.mz[i], spectrum.intensity[i]))
-
-        fp.write("END IONS\n")
-
-    # read_spectra_list = []
-    # for i, spectrum in enumerate(mzml.read(query_filename)):
-    #     print('\n Scan List: ', spectrum['scanList'])
-                
-    #     #print(spectrum['m/z array'])
-
-    #     #print(spectrum['intensity arrayu]'])
-
-    #     #print(spectrum['MS1 spectrum'])
-
-    #     print('\n Title:', spectrum['spectrum title'])
-
-    #     #print('\n MS1 spectrum: ', spectrum['MS1 spectrum'])
-
-    #     print('\n Id: ', spectrum['id'])
-
-    #     print('\n Base Peak Intensity: ', spectrum['base peak intensity'])
-
-    #     print('\n Max mz: ', spectrum['highest observed m/z'])
-
-    #     print('\n Min mz: ', spectrum['lowest observed m/z'])
-
-    #     # read_spectra_list.append([-1, ])
-    #     return
-    fp.close()
-    print("done")
-
     
 
-
-
-
-
     
-
-
-
-
 
 def load_process_single(
     file: str,
@@ -306,7 +236,6 @@ def load_process_single(
     return spec_list
 
 
-
 def read_mzml(source: Union[IO, str]) -> Iterator[MsmsSpectrum]:
     """
     Get the MS/MS spectra from the given mzML file.
@@ -322,23 +251,26 @@ def read_mzml(source: Union[IO, str]) -> Iterator[MsmsSpectrum]:
     Iterator[MsmsSpectrum]
         An iterator over the requested spectra in the given file.
     """
-    print("0")
+    print("start")
+    
     with mzml.MzML(source) as f_in:
         try:
             for i, spectrum in enumerate(f_in):
                 if int(spectrum.get('ms level', -1)) == 2:
                     try:
-                        parsed_spectrum = _parse_spectrum_mzml(spectrum)
-                        parsed_spectrum.index = i
-                        parsed_spectrum.is_processed = False
-                        yield parsed_spectrum
+                        with cProfile.Profile() as profile:
+                            parsed_spectrum = _parse_spectrum_mzml(spectrum)
+                            parsed_spectrum.index = i
+                            parsed_spectrum.is_processed = False
+                            yield parsed_spectrum
+                        results = pstats.Stats(profile)
+                        results.sort_stats(pstats.SortKey.TIME)
+                        print(i)
                     except ValueError as e:
                         logger.warning(f'Failed to read spectrum %s: %s',
                                        spectrum['id'], e)
         except LxmlError as e:
             logger.warning('Failed to read file %s: %s', source, e)
-
-
 
 def _parse_spectrum_mzml(spectrum_dict: Dict) -> MsmsSpectrum:
     """
@@ -408,21 +340,54 @@ def read_mzxml(source: Union[IO, str]) -> Iterator[MsmsSpectrum]:
     Iterator[MsmsSpectrum]
         An iterator over the requested spectra in the given file.
     """
+
     with mzxml.MzXML(source) as f_in:
+        try:
+            parsed_spectrum = map(_parse_spectrum_mzxml, f_in)
+            yield parsed_spectrum
+
+        #     for i, spectrum in enumerate(f_in):
+        #         if int(spectrum.get('msLevel', -1)) == 2:
+        #             try:
+        #                 print(i)
+        #                 #with cProfile.Profile() as profile:
+        #                 parsed_spectrum = _parse_spectrum_mzxml(spectrum)
+        #                 parsed_spectrum.index = i
+        #                 parsed_spectrum.is_processed = False
+        #                 yield parsed_spectrum
+        #                 # results = pstats.Stats(profile)
+        #                 # results.sort_stats(pstats.SortKey.TIME)
+        #                 # results.print_stats()
+        #             except ValueError as e:
+        #                 logger.warning(f'Failed to read spectrum %s: %s',
+        #                                spectrum['id'], e)
+        except LxmlError as e:
+            logger.warning('Failed to read file %s: %s', source, e)
+
+    '''
+    start = time.time()
+    with mzxml.MzXML(source) as f_in:
+        print("creating dict: %s seconds " % (time.time() - start))
         try:
             for i, spectrum in enumerate(f_in):
                 if int(spectrum.get('msLevel', -1)) == 2:
                     try:
+                        print(i)
+                        #with cProfile.Profile() as profile:
                         parsed_spectrum = _parse_spectrum_mzxml(spectrum)
                         parsed_spectrum.index = i
                         parsed_spectrum.is_processed = False
                         yield parsed_spectrum
+                        # results = pstats.Stats(profile)
+                        # results.sort_stats(pstats.SortKey.TIME)
+                        # results.print_stats()
                     except ValueError as e:
                         logger.warning(f'Failed to read spectrum %s: %s',
                                        spectrum['id'], e)
         except LxmlError as e:
             logger.warning('Failed to read file %s: %s', source, e)
-
+    print("read_mzxml: %s seconds" % (time.time() - start))
+    '''
 
 def _parse_spectrum_mzxml(spectrum_dict: Dict) -> MsmsSpectrum:
     """
@@ -444,6 +409,7 @@ def _parse_spectrum_mzxml(spectrum_dict: Dict) -> MsmsSpectrum:
         - Not an MS/MS spectrum.
         - Unknown precursor charge.
     """
+    start = time.time()
     scan_nr = int(spectrum_dict['id'])
 
     if int(spectrum_dict.get('msLevel', -1)) != 2:
@@ -462,6 +428,8 @@ def _parse_spectrum_mzxml(spectrum_dict: Dict) -> MsmsSpectrum:
     spectrum = MsmsSpectrum(str(scan_nr), precursor_mz, precursor_charge,
                             mz_array, intensity_array, retention_time)
 
+
+    #print("parsing dict: %s seconds" % (time.time() - start))
     return spectrum
 
 
@@ -488,6 +456,7 @@ def read_query_file(filename: str) -> Iterator[MsmsSpectrum]:
 
 
     if ext == '.mzml':
+        print("491")
         return read_mzml(filename)
 
 def verify_extension(supported_extensions: List[str], filename: str) -> None:
@@ -516,8 +485,17 @@ def verify_extension(supported_extensions: List[str], filename: str) -> None:
         raise FileNotFoundError(f'File {filename} does not exist')
 
 if __name__ == "__main__":
-    mzml_load(sys.argv[1])
-
+    if str(sys.argv[1])[-3] == "X":
+        print("mzxml")
+        with cProfile.Profile() as profile:
+            print(mzxml_load(sys.argv[1]))
+        results = pstats.Stats(profile)
+        results.sort_stats(pstats.SortKey.TIME)
+        #results.print_stats()
+    elif str(sys.argv[1])[-3] == "z":
+        print("mzml")
+        
+        mzml_load(sys.argv[1])
     # with cProfile.Profile() as profile:
     #     mzml_load(sys.argv[1])
 
