@@ -587,7 +587,7 @@ def load_process_spectra_parallel(
                 min_intensity = config.min_intensity,
                 max_peaks_used = config.max_peaks_used,
                 scaling = config.scaling,
-                config = config.file_type) \
+                file_type = config.file_type) \
                 for f_i in tqdm.tqdm(input_files))
 
     spectra_mz = np.array([j[6] for i in read_spectra_list for j in i], dtype=np.float32)
