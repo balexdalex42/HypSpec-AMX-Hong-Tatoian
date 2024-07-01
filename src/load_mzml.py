@@ -1,7 +1,7 @@
 #from utils import load_mgf_file 
 from typing import Dict, IO, Iterator, List, Tuple, Union, Optional
 import tqdm
-from hd_preprocess import fast_mgf_parse, preprocess_read_spectra_list
+import hd_preprocess
 from spectrum_utils.spectrum import MsmsSpectrum
 from pyteomics import mgf, mzml, mzxml, parser
 import logging
