@@ -83,13 +83,13 @@ _HyperSpec_ supports running using the command line and takes `MGF` peak files a
 
 ### Example 1
 
-    python src/main.py ~/dataset/ ./output.csv  --cpu_core_preprocess=4 --cluster_alg dbscan --use_gpu_cluster --cluster_charges 2 3 --eps=0.2 --refine
+    python src/main.py /dataset/ ./output.csv  --cpu_core_preprocess=4 --cluster_alg dbscan --use_gpu_cluster --cluster_charges 2 3 --eps=0.2
 
 This will cluster all MS/MS spectra in folder `~/dataset/` on `GPU` and generate the `output.csv` file. The number of CPU cores for preprocessing is `4`. Only `Charge 2` and `Charge 3` are clustered in this configuration. The DBSCAN clustering threshold is `eps=0.2` and post-clustering refinement is `enable`.
 
 ### Example 2
 
-    python src/main.py ~/dataset/ ./output.csv  --cpu_core_preprocess=4 --cluster_alg hc_complete --cluster_charges 2 3 --eps=0.25 --refine
+    python src/main.py /dataset/ ./output.csv  --cpu_core_preprocess=4 --cluster_alg hc_complete --cluster_charges 2 3 --eps=0.25 --refine
 
 This will cluster all MS/MS spectra in folder `~/dataset/` using `hierarchical clustering with complete linkage` on `CPU` and generate the `output.csv` file. The number of CPU cores for preprocessing is `4`. Only `Charge 2` and `Charge 3` are clustered in this configuration. The hierarchical clustering threshold is `eps=0.25` and post-clustering refinement is `enable`.
 
