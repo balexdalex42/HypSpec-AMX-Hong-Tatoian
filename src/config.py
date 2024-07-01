@@ -40,7 +40,7 @@ class Config:
         # IO
         self._parser.add_argument(
             'input_filepath', type=str,
-            help='Input peak files (supported format: .MGF).')
+            help='Input peak files (supported format: .MGF .mzXML).')
         self._parser.add_argument(
             'output_filename', type=str, 
             help='Output file name.')
@@ -49,7 +49,7 @@ class Config:
             help='Checkpoint name of spectra meta and HV (default: %(default)s).')
         self._parser.add_argument(
             '--file_type', default='mgf',
-            choices=['mgf'],
+            choices=['mgf', 'mzXML'],
             help='Spectra file type (default: %(default)s).')
 
         # self._parser.add_argument(
