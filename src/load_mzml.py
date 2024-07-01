@@ -23,31 +23,43 @@ from multiprocessing import Pool, TimeoutError
 #logger = logging.getLogger()
 
 def mzxml_load(filename):
-    start = time.time()
+    query_filename = filename
     spectra_list = []
-    with mzxml.MzXML(filename) as f_in:
-        try:
-            map_start = time.time()
+    for spectrum in read_mzxml(query_filename):
 
-            # with Pool(processes = 8) as pool:
-
-            #     parsed_spectrum = pool.imap_unordered(_parse_spectrum_mzxml, f_in)
-            #     spectra_list =  pool.imap_unordered(appending, parsed_spectrum)
-
-            parsed_spectrum = map(_parse_spectrum_mzxml, f_in)
-            spectra_list = map(appending, parsed_spectrum, filename)
-            map_runtime = time.time() - map_start
-            print(spectra_list)
-            # for spectrum in parsed_spectrum:
-            #     spectra_list.append([
-            #                 -1, spectrum.precursor_charge, spectrum.precursor_mz,
-            #                 filename, spectrum.identifier, spectrum.mz,
-            #                 spectrum.intensity])
-        except LxmlError as e:
-            logger.warning('Failed to read file %s: %s', source, e)
-    print("new runtime: %s seconds" % (time.time() - start))
-    print("map runtime: %s seconds" % map_runtime)
+        spectra_list.append([
+                            -1, spectrum.precursor_charge, spectrum.precursor_mz,
+                            query_filename, spectrum.identifier, spectrum.mz,
+                            spectrum.intensity])
+    
     return spectra_list
+
+    
+    # start = time.time()
+    # spectra_list = []
+    # with mzxml.MzXML(filename) as f_in:
+    #     try:
+    #         map_start = time.time()
+
+    #         # with Pool(processes = 8) as pool:
+
+    #         #     parsed_spectrum = pool.imap_unordered(_parse_spectrum_mzxml, f_in)
+    #         #     spectra_list =  pool.imap_unordered(appending, parsed_spectrum)
+
+    #         parsed_spectrum = map(_parse_spectrum_mzxml, f_in)
+    #         spectra_list = map(appending, parsed_spectrum, filename)
+    #         map_runtime = time.time() - map_start
+    #         print(spectra_list)
+    #         # for spectrum in parsed_spectrum:
+    #         #     spectra_list.append([
+    #         #                 -1, spectrum.precursor_charge, spectrum.precursor_mz,
+    #         #                 filename, spectrum.identifier, spectrum.mz,
+    #         #                 spectrum.intensity])
+    #     except LxmlError as e:
+    #         logger.warning('Failed to read file %s: %s', source, e)
+    # print("new runtime: %s seconds" % (time.time() - start))
+    # print("map runtime: %s seconds" % map_runtime)
+    # return spectra_list
 
 def appending(spectrum, filename):
     return [-1, spectrum.precursor_charge, spectrum.precursor_mz,
