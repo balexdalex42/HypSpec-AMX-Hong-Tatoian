@@ -539,7 +539,7 @@ def load_process_single(
     min_intensity: Optional[float] = 0.01,
     max_peaks_used: Optional[int] = 50,
     scaling: Optional[str] = 'off',
-    file_type: str
+    file_type: Optional[str] = 'mgf'
 ):
 
     #mgf mzml mzxml
