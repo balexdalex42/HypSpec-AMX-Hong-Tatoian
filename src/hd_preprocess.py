@@ -538,16 +538,17 @@ def load_process_single(
     remove_precursor_tolerance: Optional[float] = 1.50,
     min_intensity: Optional[float] = 0.01,
     max_peaks_used: Optional[int] = 50,
-    scaling: Optional[str] = 'off'
+    scaling: Optional[str] = 'off',
+    file_type: str
 ):
 
     #mgf mzml mzxml
 
-    if(file[-1] == "f"):
+    if(file_type == "mgf"):
         spec_list = fast_mgf_parse(file)
-    elif file[-3] == "x":
+    elif file_type == "mzXML":
         spec_list = mzxml_load(file)
-    elif file[-1] == "l":
+    elif file_type == "mzml":
         spec_list = mzml_load(file)
 
     if if_preprocess:
@@ -585,7 +586,8 @@ def load_process_spectra_parallel(
                 remove_precursor_tolerance = config.remove_precursor_tol,
                 min_intensity = config.min_intensity,
                 max_peaks_used = config.max_peaks_used,
-                scaling = config.scaling) \
+                scaling = config.scaling,
+                config = config.file_type) \
                 for f_i in tqdm.tqdm(input_files))
 
     spectra_mz = np.array([j[6] for i in read_spectra_list for j in i], dtype=np.float32)
