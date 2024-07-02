@@ -29,7 +29,7 @@ def mzxml_load(filename):
 
         spectra_list.append([
                             -1, spectrum.precursor_charge, spectrum.precursor_mz,
-                            query_filename, spectrum.identifier, spectrum.mz,
+                            query_filename, spectrum.identifier, float(spectrum.retention_time * 1000) spectrum.mz,
                             spectrum.intensity])
     
     return spectra_list
