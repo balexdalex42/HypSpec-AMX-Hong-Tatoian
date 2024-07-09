@@ -548,7 +548,7 @@ def load_process_single(
         spec_list = fast_mgf_parse(file)
     elif file_type == "mzXML":
         spec_list = mzxml_load(file)
-    elif file_type == "mzml":
+    elif file_type == "mzML":
         spec_list = mzml_load(file)
 
     if if_preprocess:
