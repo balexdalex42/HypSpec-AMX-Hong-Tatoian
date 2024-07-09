@@ -277,7 +277,6 @@ def read_mzml(source: Union[IO, str]) -> Iterator[MsmsSpectrum]:
                             yield parsed_spectrum
                         results = pstats.Stats(profile)
                         results.sort_stats(pstats.SortKey.TIME)
-                        print(i)
                     except ValueError as e:
                         logger.warning(f'Failed to read spectrum %s: %s',
                                        spectrum['id'], e)
@@ -468,7 +467,6 @@ def read_query_file(filename: str) -> Iterator[MsmsSpectrum]:
 
 
     if ext == '.mzml':
-        print("491")
         return read_mzml(filename)
 
 def verify_extension(supported_extensions: List[str], filename: str) -> None:
