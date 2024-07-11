@@ -95,7 +95,7 @@ def mzml_load(filename):
 
     with mzml.MzML(filename) as f_in:
         try:
-            spectra_list = list(map(_parse_spectrum_mzml, f_in))
+            spectra_list = list(filter(lambda item: item is not None, map(_parse_spectrum_mzml, f_in)))
 
 
         except LxmlError as e:
@@ -346,7 +346,7 @@ def _parse_spectrum_mzml(spectrum_dict: Dict) -> MsmsSpectrum:
         raise ValueError(f'Failed to parse scan/index number')
 
     if int(spectrum_dict.get('ms level', -1)) != 2:
-        return None
+        return 
         # raise ValueError(f'Unsupported MS level {spectrum_dict["ms level"]}')
 
 
@@ -544,8 +544,10 @@ if __name__ == "__main__":
         print("mzml")
         
         spectra = mzml_load(sys.argv[1])
+
+        for i in spectra:
+            print(i[3])
     
-        print(spectra)
     # with cProfile.Profile() as profile:
     #     mzml_load(sys.argv[1])
 
