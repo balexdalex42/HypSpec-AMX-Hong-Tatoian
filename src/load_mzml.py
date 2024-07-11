@@ -95,7 +95,7 @@ def mzml_load(filename):
 
     with mzml.MzML(filename) as f_in:
         try:
-            spectra_list = list(filter(lambda item: item is not None, map(_parse_spectrum_mzml, f_in)))
+            spectra_list = list(filter(lambda item: item is not None, map(_parse_spectrum_mzml, f_in, filename)))
 
 
         except LxmlError as e:
@@ -315,7 +315,7 @@ def read_mzml(source: Union[IO, str]) -> Iterator[MsmsSpectrum]:
         except LxmlError as e:
             logger.warning('Failed to read file %s: %s', source, e)
 
-def _parse_spectrum_mzml(spectrum_dict: Dict) -> MsmsSpectrum:
+def _parse_spectrum_mzml(spectrum_dict: Dict, filename) -> MsmsSpectrum:
     """
     Parse the Pyteomics spectrum dict.
 
@@ -365,10 +365,8 @@ def _parse_spectrum_mzml(spectrum_dict: Dict) -> MsmsSpectrum:
         precursor_charge = 20
 
     if (mz_array.size > 0):
-        return [scan_nr, precursor_mz, precursor_charge, 
-                mz_array, intensity_array, retention_time]
-    
-
+        return [-1, precursor_charge, precursor_mz, filename, scan_nr, retention_time * 1000, 
+                mz_array, intensity_array]
 
     # spectrum = MsmsSpectrum(str(scan_nr), precursor_mz, precursor_charge,
     #                         mz_array, intensity_array, retention_time)
