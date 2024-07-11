@@ -16,7 +16,7 @@ import sys
 import cProfile
 import pstats
 import time
-from multiprocessing import Pool, TimeoutError
+# from multiprocessing import Pool, TimeoutError
 
 
 
@@ -93,13 +93,16 @@ def mzml_load(filename):
     # print("new runtime: %s seconds" % (time.time() - start))
     # print("map runtime: %s seconds" % map_runtime)
 
+    with mzml.MzML(filename) as f_in:
+        try:
+            spectra_list = list(map(_parse_spectrum_mzml, f_in))
 
 
+        except LxmlError as e:
+            logger.warning('Failed to read file %s: %s', source, e)
+    # for spectrum in read_mzml(filename):
 
-    for spectrum in read_mzml(filename):
-
-        spectra_list.append(spectrum)
-    
+    #     spectra_list.append(spectrum)
     return spectra_list
 
 def convert_mzxml_mgf(filename):
@@ -343,7 +346,8 @@ def _parse_spectrum_mzml(spectrum_dict: Dict) -> MsmsSpectrum:
         raise ValueError(f'Failed to parse scan/index number')
 
     if int(spectrum_dict.get('ms level', -1)) != 2:
-        raise ValueError(f'Unsupported MS level {spectrum_dict["ms level"]}')
+        return None
+        # raise ValueError(f'Unsupported MS level {spectrum_dict["ms level"]}')
 
 
     mz_array = spectrum_dict['m/z array']
@@ -541,9 +545,7 @@ if __name__ == "__main__":
         
         spectra = mzml_load(sys.argv[1])
     
-        for i in spectra:
-            if i != None:
-                print(i[3])
+        print(spectra)
     # with cProfile.Profile() as profile:
     #     mzml_load(sys.argv[1])
 
