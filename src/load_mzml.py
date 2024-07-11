@@ -303,7 +303,7 @@ def read_mzml(source: Union[IO, str]) -> Iterator[MsmsSpectrum]:
                             #parsed_spectrum.index = i
                             if parsed_spectrum != None:
                                 parsed_spectrum.append(False)
-                            yield parsed_spectrum
+                                yield parsed_spectrum
                         results = pstats.Stats(profile)
                         results.sort_stats(pstats.SortKey.TIME)
                     except ValueError as e:
@@ -542,7 +542,8 @@ if __name__ == "__main__":
         spectra = mzml_load(sys.argv[1])
     
         for i in spectra:
-            print(i)
+            if i != None:
+                print(i[3])
     # with cProfile.Profile() as profile:
     #     mzml_load(sys.argv[1])
 
