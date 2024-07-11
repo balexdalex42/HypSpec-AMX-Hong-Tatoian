@@ -30,8 +30,8 @@ Install via Docker
 
 We recommend installing _HyperSpec_ via docker using the following command:
 
-    docker build --no-cache -f ./docker/Dockerfile -t hyper_spec .
-    docker run --gpus all -v /ms-dataset/:/dataset/ -it hyper_spec /bin/bash
+    docker build --no-cache -f ./docker/Dockerfile -t hyper_spec-m .
+    docker run --gpus all -v /ms-dataset/:/dataset/ -it hyper_spec-m /bin/bash
 
 Install from Source
 *********************
