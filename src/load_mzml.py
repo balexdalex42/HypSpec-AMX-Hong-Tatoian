@@ -1,7 +1,7 @@
 #from utils import load_mgf_file 
 from typing import Dict, IO, Iterator, List, Tuple, Union, Optional
 import tqdm
-import hd_preprocess
+#import hd_preprocess
 from spectrum_utils.spectrum import MsmsSpectrum
 from pyteomics import mgf, mzml, mzxml, parser
 import logging
@@ -67,14 +67,38 @@ def appending(spectrum, filename):
                             spectrum.intensity]
 
 def mzml_load(filename):
-    query_filename = filename
     spectra_list = []
-    for spectrum in read_mzml(query_filename):
+    # start = time.time()
 
-        spectra_list.append([
-                            -1, spectrum.precursor_charge, spectrum.precursor_mz,
-                            query_filename, spectrum.identifier,float(spectrum.retention_time * 1000), spectrum.mz,
-                            spectrum.intensity])
+    # with mzml.MzML(filename) as f_in:
+    #     try:
+    #         map_start = time.time()
+
+    #         # with Pool(processes = 8) as pool:
+
+    #         #     parsed_spectrum = pool.imap_unordered(_parse_spectrum_mzxml, f_in)
+    #         #     spectra_list =  pool.imap_unordered(appending, parsed_spectrum)
+
+    #         spectra_list = map(_parse_spectrum_mzml, f_in)
+    #         map_runtime = time.time() - map_start
+    #         for i in spectra_list:
+    #             print(i)
+    #         # for spectrum in parsed_spectrum:
+    #         #     spectra_list.append([
+    #         #                 -1, spectrum.precursor_charge, spectrum.precursor_mz,
+    #         #                 filename, spectrum.identifier, spectrum.mz,
+    #         #                 spectrum.intensity])
+    #     except LxmlError as e:
+    #         logger.warning('Failed to read file %s: %s', source, e)
+    # print("new runtime: %s seconds" % (time.time() - start))
+    # print("map runtime: %s seconds" % map_runtime)
+
+
+
+
+    for spectrum in read_mzml(filename):
+
+        spectra_list.append(spectrum)
     
     return spectra_list
 
@@ -264,6 +288,10 @@ def read_mzml(source: Union[IO, str]) -> Iterator[MsmsSpectrum]:
         An iterator over the requested spectra in the given file.
     """
     print("start")
+
+    #TODO 
+    #found in documentation need to experiement
+    #mzml.MzML.map()
     
     with mzml.MzML(source) as f_in:
         try:
@@ -272,8 +300,9 @@ def read_mzml(source: Union[IO, str]) -> Iterator[MsmsSpectrum]:
                     try:
                         with cProfile.Profile() as profile:
                             parsed_spectrum = _parse_spectrum_mzml(spectrum)
-                            parsed_spectrum.index = i
-                            parsed_spectrum.is_processed = False
+                            #parsed_spectrum.index = i
+                            if parsed_spectrum != None:
+                                parsed_spectrum.append(False)
                             yield parsed_spectrum
                         results = pstats.Stats(profile)
                         results.sort_stats(pstats.SortKey.TIME)
@@ -329,12 +358,17 @@ def _parse_spectrum_mzml(spectrum_dict: Dict) -> MsmsSpectrum:
     elif 'possible charge state' in precursor_ion:
         precursor_charge = int(precursor_ion['possible charge state'])
     else:
-        precursor_charge = None
+        precursor_charge = 20
 
-    spectrum = MsmsSpectrum(str(scan_nr), precursor_mz, precursor_charge,
-                            mz_array, intensity_array, retention_time)
+    if (mz_array.size > 0):
+        return [scan_nr, precursor_mz, precursor_charge, 
+                mz_array, intensity_array, retention_time]
+    
 
-    return spectrum
+
+    # spectrum = MsmsSpectrum(str(scan_nr), precursor_mz, precursor_charge,
+    #                         mz_array, intensity_array, retention_time)
+    return 
 
 def read_mzxml(source: Union[IO, str]) -> Iterator[MsmsSpectrum]:
     """
@@ -505,7 +539,10 @@ if __name__ == "__main__":
     elif str(sys.argv[1])[-3] == "z":
         print("mzml")
         
-        mzml_load(sys.argv[1])
+        spectra = mzml_load(sys.argv[1])
+    
+        for i in spectra:
+            print(i)
     # with cProfile.Profile() as profile:
     #     mzml_load(sys.argv[1])
 
