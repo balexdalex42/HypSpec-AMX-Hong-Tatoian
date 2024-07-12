@@ -97,7 +97,6 @@ def mzml_load(filename):
         try:
             spectra_list = list(filter(lambda item: item is not None, map(_parse_spectrum_mzml, f_in, filename)))
 
-
         except LxmlError as e:
             logger.warning('Failed to read file %s: %s', source, e)
     # for spectrum in read_mzml(filename):
@@ -345,32 +344,32 @@ def _parse_spectrum_mzml(spectrum_dict: Dict, filename) -> MsmsSpectrum:
         raise ValueError(f'Failed to parse scan/index number')
 
     if int(spectrum_dict.get('ms level', -1)) != 2:
-        return 
-        # raise ValueError(f'Unsupported MS level {spectrum_dict["ms level"]}')
+            mz_array = spectrum_dict['m/z array']
+            intensity_array = spectrum_dict['intensity array']
+            retention_time = spectrum_dict['scanList']['scan'][0]['scan start time']
 
-
-    mz_array = spectrum_dict['m/z array']
-    intensity_array = spectrum_dict['intensity array']
-    retention_time = spectrum_dict['scanList']['scan'][0]['scan start time']
-
-    precursor = spectrum_dict['precursorList']['precursor'][0]
-    precursor_ion = precursor['selectedIonList']['selectedIon'][0]
-    precursor_mz = precursor_ion['selected ion m/z']
-    if 'charge state' in precursor_ion:
-        precursor_charge = int(precursor_ion['charge state'])
-    elif 'possible charge state' in precursor_ion:
-        precursor_charge = int(precursor_ion['possible charge state'])
+            precursor_charge = 20
+            precursor_mz = 20
     else:
-        precursor_charge = 20
+        mz_array = spectrum_dict['m/z array']
+        intensity_array = spectrum_dict['intensity array']
+        retention_time = spectrum_dict['scanList']['scan'][0]['scan start time']
 
-    if (mz_array.size > 0):
+        precursor = spectrum_dict['precursorList']['precursor'][0]
+        precursor_ion = precursor['selectedIonList']['selectedIon'][0]
+        precursor_mz = precursor_ion['selected ion m/z']
+        if 'charge state' in precursor_ion:
+            precursor_charge = int(precursor_ion['charge state'])
+        elif 'possible charge state' in precursor_ion:
+            precursor_charge = int(precursor_ion['possible charge state'])
 
-        return [-1, precursor_charge, precursor_mz, filename, scan_nr, retention_time * 1000, 
+
+
+    return [-1, precursor_charge, precursor_mz, filename, scan_nr, retention_time * 1000, 
                 mz_array, intensity_array]
 
     # spectrum = MsmsSpectrum(str(scan_nr), precursor_mz, precursor_charge,
     #                         mz_array, intensity_array, retention_time)
-    return 
 
 def read_mzxml(source: Union[IO, str]) -> Iterator[MsmsSpectrum]:
     """
@@ -543,8 +542,7 @@ if __name__ == "__main__":
         
         spectra = mzml_load(sys.argv[1])
 
-        #print(spectra[0])
-    
+        print(spectra)  
     # with cProfile.Profile() as profile:
     #     mzml_load(sys.argv[1])
 
