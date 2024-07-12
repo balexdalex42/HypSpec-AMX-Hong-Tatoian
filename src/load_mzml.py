@@ -305,7 +305,6 @@ def read_mzml(source: Union[IO, str]) -> Iterator[MsmsSpectrum]:
                             parsed_spectrum = _parse_spectrum_mzml(spectrum)
                             #parsed_spectrum.index = i
                             if parsed_spectrum != None:
-                                parsed_spectrum.append(False)
                                 yield parsed_spectrum
                         results = pstats.Stats(profile)
                         results.sort_stats(pstats.SortKey.TIME)
@@ -365,6 +364,7 @@ def _parse_spectrum_mzml(spectrum_dict: Dict, filename) -> MsmsSpectrum:
         precursor_charge = 20
 
     if (mz_array.size > 0):
+
         return [-1, precursor_charge, precursor_mz, filename, scan_nr, retention_time * 1000, 
                 mz_array, intensity_array]
 
@@ -543,8 +543,7 @@ if __name__ == "__main__":
         
         spectra = mzml_load(sys.argv[1])
 
-        for i in spectra:
-            print(i[3])
+        #print(spectra[0])
     
     # with cProfile.Profile() as profile:
     #     mzml_load(sys.argv[1])
