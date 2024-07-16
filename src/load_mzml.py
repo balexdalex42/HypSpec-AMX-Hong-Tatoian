@@ -18,6 +18,8 @@ import pstats
 import time
 # from multiprocessing import Pool, TimeoutError
 
+temp_charge = 2
+temp_mz = 150.0
 
 
 #logger = logging.getLogger()
@@ -335,7 +337,8 @@ def _parse_spectrum_mzml(spectrum_dict: Dict, filename) -> MsmsSpectrum:
         - Unknown precursor charge.
     """
     spectrum_id = spectrum_dict['id']
-
+    global temp_charge
+    global temp_mz
     if 'scan=' in spectrum_id:
         scan_nr = int(spectrum_id[spectrum_id.find('scan=') + len('scan='):])
     elif 'index=' in spectrum_id:
@@ -343,18 +346,11 @@ def _parse_spectrum_mzml(spectrum_dict: Dict, filename) -> MsmsSpectrum:
     else:
         raise ValueError(f'Failed to parse scan/index number')
 
-    if int(spectrum_dict.get('ms level', -1)) != 2:
-            mz_array = spectrum_dict['m/z array']
-            intensity_array = spectrum_dict['intensity array']
-            retention_time = spectrum_dict['scanList']['scan'][0]['scan start time']
-
-            precursor_charge = 20
-            precursor_mz = 20
-    else:
-        mz_array = spectrum_dict['m/z array']
-        intensity_array = spectrum_dict['intensity array']
-        retention_time = spectrum_dict['scanList']['scan'][0]['scan start time']
-
+    
+    mz_array = spectrum_dict['m/z array']
+    intensity_array = spectrum_dict['intensity array']
+    retention_time = spectrum_dict['scanList']['scan'][0]['scan start time']
+    try:
         precursor = spectrum_dict['precursorList']['precursor'][0]
         precursor_ion = precursor['selectedIonList']['selectedIon'][0]
         precursor_mz = precursor_ion['selected ion m/z']
@@ -362,7 +358,11 @@ def _parse_spectrum_mzml(spectrum_dict: Dict, filename) -> MsmsSpectrum:
             precursor_charge = int(precursor_ion['charge state'])
         elif 'possible charge state' in precursor_ion:
             precursor_charge = int(precursor_ion['possible charge state'])
-
+        temp_charge = precursor_charge
+        temp_mz = precursor_mz
+    except:
+        precursor_charge = temp_charge
+        precursor_mz = temp_mz
 
 
     return [-1, precursor_charge, precursor_mz, filename, scan_nr, retention_time * 1000, 
