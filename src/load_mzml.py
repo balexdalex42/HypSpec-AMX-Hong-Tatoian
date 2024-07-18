@@ -300,22 +300,19 @@ def read_mzml(source: Union[IO, str]) -> Iterator[MsmsSpectrum]:
     with mzml.MzML(source) as f_in:
         try:
             for i, spectrum in enumerate(f_in):
-                if int(spectrum.get('ms level', -1)) == 2:
-                    try:
-                        with cProfile.Profile() as profile:
-                            parsed_spectrum = _parse_spectrum_mzml(spectrum)
+                try:
+                    with cProfile.Profile() as profile:
+                        parsed_spectrum = _parse_spectrum_mzml(spectrum)
                             #parsed_spectrum.index = i
-                            if parsed_spectrum != None:
-                                yield parsed_spectrum
+                        yield parsed_spectrum
                         results = pstats.Stats(profile)
                         results.sort_stats(pstats.SortKey.TIME)
-                    except ValueError as e:
-                        logger.warning(f'Failed to read spectrum %s: %s',
+                except ValueError as e:
+                    logger.warning(f'Failed to read spectrum %s: %s',
                                        spectrum['id'], e)
         except LxmlError as e:
             logger.warning('Failed to read file %s: %s', source, e)
-
-def _parse_spectrum_mzml(spectrum_dict: Dict, filename) -> MsmsSpectrum:
+def _parse_spectrum_mzml(spectrum_dict: Dict) -> MsmsSpectrum:
     """
     Parse the Pyteomics spectrum dict.
 
@@ -365,11 +362,9 @@ def _parse_spectrum_mzml(spectrum_dict: Dict, filename) -> MsmsSpectrum:
         precursor_mz = temp_mz
 
 
-    return [-1, precursor_charge, precursor_mz, filename, scan_nr, retention_time * 1000, 
-                mz_array, intensity_array]
-
-    # spectrum = MsmsSpectrum(str(scan_nr), precursor_mz, precursor_charge,
-    #                         mz_array, intensity_array, retention_time)
+    spectrum = MsmsSpectrum(str(scan_nr), precursor_mz, precursor_charge,
+                            mz_array, intensity_array, retention_time)
+    return spectrum
 
 def read_mzxml(source: Union[IO, str]) -> Iterator[MsmsSpectrum]:
     """
