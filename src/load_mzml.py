@@ -97,7 +97,7 @@ def mzml_load(filename):
 
     query_filename = filename
     spectra_list = []
-    for spectrum in read_mzxml(query_filename):
+    for spectrum in read_mzml(query_filename):
 
         spectra_list.append([
                             -1, spectrum.precursor_charge, spectrum.precursor_mz,
