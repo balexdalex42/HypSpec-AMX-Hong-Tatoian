@@ -95,15 +95,15 @@ def mzml_load(filename):
     # print("new runtime: %s seconds" % (time.time() - start))
     # print("map runtime: %s seconds" % map_runtime)
 
-    with mzml.MzML(filename) as f_in:
-        try:
-            spectra_list = list(filter(lambda item: item is not None, map(_parse_spectrum_mzml, f_in, filename)))
+    query_filename = filename
+    spectra_list = []
+    for spectrum in read_mzxml(query_filename):
 
-        except LxmlError as e:
-            logger.warning('Failed to read file %s: %s', source, e)
-    # for spectrum in read_mzml(filename):
-
-    #     spectra_list.append(spectrum)
+        spectra_list.append([
+                            -1, spectrum.precursor_charge, spectrum.precursor_mz,
+                            query_filename, spectrum.identifier, float(spectrum.retention_time * 1000), spectrum.mz,
+                            spectrum.intensity])
+    
     return spectra_list
 
 def convert_mzxml_mgf(filename):
