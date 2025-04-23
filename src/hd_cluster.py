@@ -444,19 +444,19 @@ def encode_func(
 ) -> np.ndarray:
     intensity, mz = data_dict['intensity'][slice_idx[0]: slice_idx[1]], data_dict['mz'][slice_idx[0]: slice_idx[1]]
 
-    lv_hvs, id_hvs = cp.array(data_dict['lv_hvs']), cp.array(data_dict['id_hvs'])
+    lv_hvs, id_hvs = np.array(data_dict['lv_hvs'], np.float32), cp.array(data_dict['id_hvs'], np.float32)
 
     batch_size = slice_idx[1] - slice_idx[0]
     
     return hd_encode_spectra_packed(intensity, mz, id_hvs, lv_hvs, batch_size, D, Q, output_type)
 
-
+#CHANGE: lv_hvs_packed and id_hvs_packed now take in np.arrays as params
 def encode_preprocessed_spectra(
     spectra_df: pd.DataFrame, 
     config: Config,
     dim: int,
-    lv_hvs_packed: cp.array,
-    id_hvs_packed: cp.array,
+    lv_hvs_packed: np.array,
+    id_hvs_packed: np.array,
     logger: logging,
     batch_size: int = 5000,
     output_type: str='numpy'
@@ -466,8 +466,11 @@ def encode_preprocessed_spectra(
     num_spectra = len(spectra_df)
     num_batch = num_spectra//batch_size+1
 
-    lv_hvs = cp.asnumpy(lv_hvs_packed).ravel()
-    id_hvs = cp.asnumpy(id_hvs_packed).ravel()
+    #lv_hvs = cp.asnumpy(lv_hvs_packed).ravel()
+    #id_hvs = cp.asnumpy(id_hvs_packed).ravel()
+    #NO NEED TO CONVERT lv/id_hvs to np.array!
+    lv_hvs = lv_hvs_packed
+    id_hvs = id_hvs_packed #we copy these references to limit the amount of code manipulation and thus potential mistakes!
 
     print('time 1: ', time.time()-start)
     
@@ -510,10 +513,12 @@ def encode_spectra(
     bin_len, min_mz, max_mz = get_dim(config.min_mz, config.max_mz, config.fragment_tol)
     
     lv_hvs, id_hvs = gen_lv_id_hvs(config.hd_dim, config.hd_Q, bin_len, config.hd_id_flip_factor, logger)
-    
+    #need to update gen_lv_id_hvs such that we can have the return be a nparray not cparray (using AMX instead of GPU)
     data_dict = {
-        'lv_hvs': cp.asnumpy(lv_hvs).ravel(), 
-        'id_hvs': cp.asnumpy(id_hvs).ravel(), 
+        # 'lv_hvs': cp.asnumpy(lv_hvs).ravel(), #since lv/id_hvs are nparrays, do not do cp conversion!
+        # 'id_hvs': cp.asnumpy(id_hvs).ravel(), 
+        'lv_hvs': lv_hvs,
+        'id_hvs': id_hvs,
         'intensity': spectra_intensity, 'mz': spectra_mz}
 
     num_spectra = spectra_mz.shape[0]
