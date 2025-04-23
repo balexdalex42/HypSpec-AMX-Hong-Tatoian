@@ -34,7 +34,8 @@ def gen_lvs(D: int, Q: int):
         li = np.copy(l0)
         li[:flip] = l0[:flip] * -1
         levels.append(list(li))
-    return cp.array(levels, dtype=cp.float32).ravel()
+    # return cp.array(levels, dtype=cp.float32).ravel()
+    return np.array(levels, dtype=np.float32) #converts list to np array instead of cparray
 
 
 def gen_idhvs(D: int, totalFeatures: int, flip_factor: float):
@@ -65,7 +66,8 @@ def gen_lv_id_hvs(
     lv_id_hvs_file = 'lv_id_hvs_D_{}_Q_{}_bin_{}_flip_{}.npz'.format(D, Q, bin_len, id_flip_factor)
     if os.path.exists(lv_id_hvs_file):
         logger.info("Load existing {} file for HD".format(lv_id_hvs_file))
-        data = cp.load(lv_id_hvs_file)
+        # data = cp.load(lv_id_hvs_file)
+        data = np.load(lv_id_hvs_file) #this will load file onto np array instead
         lv_hvs, id_hvs = data['lv_hvs'], data['id_hvs']
     else:
         lv_hvs = gen_lvs(D, Q)
