@@ -156,6 +156,11 @@ class Config:
             help='The eps parameter (Hamming distance) for DBSCAN clustering '
                  '(default: %(default)s). Relevant Hamming distance thresholds '
                  'are typically around 0.6.')
+        
+        #AMX
+        self._parser.add_argument(
+            '--amx', action='store_true', help='Add this argument if you want to call cluster_amx instead of cluster'
+        )
 
         # Filled in 'parse', contains the specified settings.
         self._namespace = None
