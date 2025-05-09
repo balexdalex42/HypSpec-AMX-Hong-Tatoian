@@ -7,7 +7,8 @@ from config import *
 import tqdm
 import pandas as pd
 
-import hd_preprocess, hd_cluster
+
+import hd_preprocess, hd_cluster, hd_cluster_amx
 
 logger = logging.getLogger('HyperSpec')
 
@@ -62,7 +63,8 @@ def main(args: Union[str, List[str]] = None) -> int:
     logger.debug('fragment_tol = %.2f', config.fragment_tol)
     logger.debug('eps = %.3f', config.eps)
 
-    
+    #SETTING FILE TO CHOOSE CLUSTER FUNCTIONS
+    hd_cluster_lib = hd_cluster_amx if config.amx else hd_cluster
     # Restore checkpoints
     spectra_meta_df, spectra_hvs = None, None
     if config.checkpoint:
@@ -75,8 +77,12 @@ def main(args: Union[str, List[str]] = None) -> int:
         logger.info("Preserve {} spectra for cluster charges: {}".format(len(spectra_meta_df), config.cluster_charges))
         
         ###################### 2 HD Encoding for spectra
-        spectra_hvs = hd_cluster.encode_spectra(
-            spectra_mz=spectra_mz, spectra_intensity=spectra_intensity, config=config, logger=logger)
+        # spectra_hvs = hd_cluster.encode_spectra(
+        #     spectra_mz=spectra_mz, spectra_intensity=spectra_intensity, config=config, logger=logger) old
+        #NEW
+        spectra_hvs = hd_cluster_lib.encode_spectra(
+             spectra_mz=spectra_mz, spectra_intensity=spectra_intensity, config=config, logger=logger)
+            
 
         # Save meta and encoding data
         if config.checkpoint:
@@ -93,8 +99,13 @@ def main(args: Union[str, List[str]] = None) -> int:
         spec_df_by_charge = spectra_meta_df.loc[idx]
 
         logger.info("Start clustering Charge {} with {} spectra".format(prec_charge_i, len(spec_df_by_charge)))
-        
-        cluster_labels_per_charge, cluster_representatives_per_charge = hd_cluster.cluster_spectra(
+
+        #OLD 
+        # cluster_labels_per_charge, cluster_representatives_per_charge = hd_cluster.cluster_spectra(
+        #     spectra_by_charge_df=spec_df_by_charge, encoded_spectra_hv=spectra_hvs[idx],
+        #     config=config, logger=logger) 
+        #NEW
+        cluster_labels_per_charge, cluster_representatives_per_charge = hd_cluster_lib.cluster_spectra(
             spectra_by_charge_df=spec_df_by_charge, encoded_spectra_hv=spectra_hvs[idx],
             config=config, logger=logger)
 
@@ -112,3 +123,4 @@ def main(args: Union[str, List[str]] = None) -> int:
 if __name__ == "__main__":
     main()
 
+# argument

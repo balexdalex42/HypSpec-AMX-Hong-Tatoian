@@ -78,6 +78,8 @@ Usage and Example
                                 (default: False)
     --checkpoint                The checkpoint filename to save the encoded HVs of spectra (default: None)
 
+    --amx                       Flag used to set if you want to use AMX instead of standard GPU (cuda-based) clustering
+
 
 _HyperSpec_ supports running using the command line and takes `MGF` peak files as input and exports the clustering result as a CSV file with each MS/MS spectrum and its cluster label on a single line. Here we provide two examples of running _HyperSpec_:
 
