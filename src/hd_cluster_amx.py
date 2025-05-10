@@ -1,11 +1,12 @@
 import os, time, logging, math
 from tqdm import tqdm
 
-import numpy as np
-np.random.seed(0)
 
+import numpy as np
 import torch
-from utils import timer
+from torch.ao.nn.quantized import QFunctional
+
+np.random.seed(0)
 
 import numba as nb
 from numba import cuda
@@ -37,8 +38,7 @@ def gen_lvs(D: int, Q: int):
         li = np.copy(l0)
         li[:flip] = l0[:flip] * -1
         levels.append(list(li))
-    # return cp.array(levels, dtype=cp.float32).ravel()
-    return np.array(levels, dtype=np.float32) #converts list to np array instead of cparray
+    return cp.array(levels, dtype=cp.float32).ravel()
 
 
 def gen_idhvs(D: int, totalFeatures: int, flip_factor: float):
@@ -69,8 +69,7 @@ def gen_lv_id_hvs(
     lv_id_hvs_file = 'lv_id_hvs_D_{}_Q_{}_bin_{}_flip_{}.npz'.format(D, Q, bin_len, id_flip_factor)
     if os.path.exists(lv_id_hvs_file):
         logger.info("Load existing {} file for HD".format(lv_id_hvs_file))
-        # data = cp.load(lv_id_hvs_file)
-        data = np.load(lv_id_hvs_file) #this will load file onto np array instead
+        data = cp.load(lv_id_hvs_file)
         lv_hvs, id_hvs = data['lv_hvs'], data['id_hvs']
     else:
         lv_hvs = gen_lvs(D, Q)
@@ -175,60 +174,6 @@ def hd_encode_spectra_packed(spectra_intensity, spectra_mz, id_hvs_packed, lv_hv
     elif output_type=='cupy':
         return encoded_spectra.reshape(N, packed_dim)
 
-# === CPU AMX-Accelerated Level-ID Encoding ===
-@timer
-def hd_encode_spectra_cpu_amx(
-    spectra_intensity: np.ndarray,
-    spectra_mz: np.ndarray,
-    lvl_hvs_np: np.ndarray,
-    id_hvs_np: np.ndarray,
-    D: int,
-    Q: int,
-    max_peaks_used: int,
-    output_type: str = 'numpy',
-) -> np.ndarray:
-    """
-    CPU implementation of level-ID hypervector encoding using PyTorch AMP on bfloat16.
-
-    Replaces the GPU RawKernel hd_enc_lvid_packed_cuda.
-
-    Args:
-      spectra_intensity: shape (N, max_peaks_used), float32
-      spectra_mz:        shape (N, max_peaks_used), int64 indices of levels
-      lvl_hvs_np:        shape (Q+1, D), float32
-      id_hvs_np:         shape (num_features, D), float32
-      D:                 dimension of hypervectors
-      Q:                 number of quantization levels
-      max_peaks_used:    number of peaks per spectrum
-      output_type:       'numpy' or 'torch'
-
-    Returns:
-      Encoded hypervectors, shape (N, D).
-    """
-    # Convert data to Torch tensors in bfloat16 for AMX acceleration
-    intensity = torch.tensor(spectra_intensity, dtype=torch.bfloat16, device='cpu')  # (N, P)
-    mz = torch.tensor(spectra_mz, dtype=torch.int64, device='cpu')                 # (N, P)
-    lvl_hvs = torch.tensor(lvl_hvs_np, dtype=torch.bfloat16, device='cpu')          # (Q+1, D)
-    id_hvs = torch.tensor(id_hvs_np, dtype=torch.bfloat16, device='cpu')            # (F, D)
-
-    # Clip level indices to [0, Q]
-    bins = torch.clamp(mz, 0, Q)  # (N, P)
-
-    # Gather level hypervectors per peak: result shape (N, P, D)
-    lvl_vectors = torch.index_select(lvl_hvs, 0, bins.view(-1)).view(-1, max_peaks_used, D)
-
-    # Gather ID hypervectors per feature: shape (N, P, D)
-    id_vectors = torch.index_select(id_hvs, 0, mz.view(-1)).view(-1, max_peaks_used, D)
-
-    # Elementwise multiplication and sum across peaks -> (N, D)
-    with torch.amp.autocast('cpu', dtype=torch.bfloat16):
-        enc = torch.einsum('npd,npd->nd', lvl_vectors, id_vectors)
-
-    # Convert output back
-    if output_type == 'torch':
-        return enc
-    else:
-        return enc.cpu().float().numpy()
 
 @cuda.jit('float32(uint32, uint32)', device=True, inline=True)
 def fast_hamming_op(a, b):
@@ -349,61 +294,6 @@ def fast_pw_dist_cosine_mask_packed_condense(A, D, prec_mz, prec_tol, N, pack_le
             tmp/=(32*pack_len)
             D[int(N*x-(x*x+x)/2+y-x-1)] = tmp
            
-
-# === CPU AMX-Accelerated Pairwise Cosine Distance ===
-@timer
-def fast_pw_dist_cosine_mask_cpu_amx(
-    hvs_np: np.ndarray,
-    prec_mz_np: np.ndarray,
-    prec_tol: float,
-    output_type: str = 'numpy',
-) -> np.ndarray:
-    """
-    Compute pairwise cosine-based Hamming similarity on CPU using Torch AMX.
-
-    Replaces the CUDA kernel fast_pw_dist_cosine_mask_packed.
-
-    Args:
-      hvs_np:      Packed hypervectors, shape (N, pack_len) as uint32 or int8 array
-      prec_mz_np:  shape (N,), float32 precursor m/z values
-      prec_tol:    tolerance in relative ppm
-      output_type: 'numpy' or 'torch'
-
-    Returns:
-      Distance matrix shape (N, N).
-    """
-    # Convert to Torch
-    # Unpack bits: for performance, reshape and use bitwise ops or popcount
-    # Here we assume hvs_np is a bool tensor [N, D]
-    # TODO: implement efficient bit unpacking and popcount via torch.packbits / torch.bitwise
-
-    hvs = torch.tensor(hvs_np, dtype=torch.int8, device='cpu')  # or bool -> float
-    prec_mz = torch.tensor(prec_mz_np, dtype=torch.float32, device='cpu')
-    N, D = hvs.shape
-
-    # Normalize hypervectors
-    hvs_float = hvs.to(torch.float32)
-    norms = torch.norm(hvs_float, dim=1, keepdim=True)
-    hvs_norm = hvs_float / norms
-
-    # Compute cosine similarity: (N, D) @ (D, N) -> (N, N)
-    with torch.amp.autocast('cpu', dtype=torch.bfloat16):
-        sim_matrix = torch.matmul(hvs_norm, hvs_norm.T)
-
-    # Convert similarity to cosine distance
-    dist = 1.0 - sim_matrix
-
-    # Apply precursor filter mask
-    pmz = prec_mz.view(-1, 1)
-    rel_diff = torch.abs(pmz - pmz.T) / pmz.T
-    mask = rel_diff >= prec_tol
-    dist = torch.where(mask, torch.ones_like(dist), dist)
-
-    if output_type == 'torch':
-        return dist
-    else:
-        return dist.cpu().numpy()
-
 
 def fast_nb_cosine_dist_condense(hvs, prec_mz, prec_tol, output_type, stream=None):
     N, pack_len = hvs.shape
@@ -558,19 +448,19 @@ def encode_func(
 ) -> np.ndarray:
     intensity, mz = data_dict['intensity'][slice_idx[0]: slice_idx[1]], data_dict['mz'][slice_idx[0]: slice_idx[1]]
 
-    lv_hvs, id_hvs = np.array(data_dict['lv_hvs'], np.float32), cp.array(data_dict['id_hvs'], np.float32)
+    lv_hvs, id_hvs = cp.array(data_dict['lv_hvs']), cp.array(data_dict['id_hvs'])
 
     batch_size = slice_idx[1] - slice_idx[0]
     
     return hd_encode_spectra_packed(intensity, mz, id_hvs, lv_hvs, batch_size, D, Q, output_type)
 
-#CHANGE: lv_hvs_packed and id_hvs_packed now take in np.arrays as params
+
 def encode_preprocessed_spectra(
     spectra_df: pd.DataFrame, 
     config: Config,
     dim: int,
-    lv_hvs_packed: np.array,
-    id_hvs_packed: np.array,
+    lv_hvs_packed: cp.array,
+    id_hvs_packed: cp.array,
     logger: logging,
     batch_size: int = 5000,
     output_type: str='numpy'
@@ -580,11 +470,8 @@ def encode_preprocessed_spectra(
     num_spectra = len(spectra_df)
     num_batch = num_spectra//batch_size+1
 
-    #lv_hvs = cp.asnumpy(lv_hvs_packed).ravel()
-    #id_hvs = cp.asnumpy(id_hvs_packed).ravel()
-    #NO NEED TO CONVERT lv/id_hvs to np.array!
-    lv_hvs = lv_hvs_packed
-    id_hvs = id_hvs_packed #we copy these references to limit the amount of code manipulation and thus potential mistakes!
+    lv_hvs = cp.asnumpy(lv_hvs_packed).ravel()
+    id_hvs = cp.asnumpy(id_hvs_packed).ravel()
 
     print('time 1: ', time.time()-start)
     
@@ -614,41 +501,41 @@ def encode_preprocessed_spectra(
 
 
 def encode_spectra(
-    spectra_mz: np.ndarray, 
-    spectra_intensity: np.ndarray, 
-    config: Config,
-    logger: logging,
-    batch_size: int = 5000,
-    output_type: str='numpy'
-)-> np.ndarray:
-    start = time.time()
+    spectra_mz: np.ndarray,
+    spectra_intensity: np.ndarray,
+    config,
+    logger,
+    **kwargs
+) -> np.ndarray:
+    """
+    Encode spectra into hypervectors and quantize to int8 for AMX testing.
+    """
+    # Import the original encoder
+    from hd_cluster import encode_spectra as orig_encode
 
-    # Generate LV-ID hypervectors
-    bin_len, min_mz, max_mz = get_dim(config.min_mz, config.max_mz, config.fragment_tol)
-    
-    lv_hvs, id_hvs = gen_lv_id_hvs(config.hd_dim, config.hd_Q, bin_len, config.hd_id_flip_factor, logger)
-    #need to update gen_lv_id_hvs such that we can have the return be a nparray not cparray (using AMX instead of GPU)
-    data_dict = {
-        # 'lv_hvs': cp.asnumpy(lv_hvs).ravel(), #since lv/id_hvs are nparrays, do not do cp conversion!
-        # 'id_hvs': cp.asnumpy(id_hvs).ravel(), 
-        'lv_hvs': lv_hvs,
-        'id_hvs': id_hvs,
-        'intensity': spectra_intensity, 'mz': spectra_mz}
+    # Generate the float32 hypervectors
+    hv = orig_encode(
+        spectra_mz=spectra_mz,
+        spectra_intensity=spectra_intensity,
+        config=config,
+        logger=logger,
+        output_type='numpy',
+        **kwargs
+    )  # shape: (N, D)
 
-    num_spectra = spectra_mz.shape[0]
-    num_batch = num_spectra//batch_size+1
+    # Convert to torch tensor
+    hv_tensor = torch.tensor(hv, dtype=torch.float32)
 
-    # Encode spectra on GPU
-    encoded_spectra = [ encode_func(
-        [i*batch_size, min((i+1)*batch_size, num_spectra)], 
-        data_dict, config.hd_dim, config.hd_Q, bin_len, output_type) for i in tqdm(range(num_batch)) ] 
-                    
-    encoded_spectra = np.concatenate(encoded_spectra, dtype=np.uint32)\
-        if output_type=='numpy' else encoded_spectra
+    # Determine quantization parameters
+    max_val = hv_tensor.abs().max().item()
+    scale = max_val / 127.0 if max_val != 0 else 1.0
+    zero_point = 0
 
-    logger.info("Encode {} spectra in {:.4f}s".format(len(encoded_spectra), time.time()-start))
+    # Quantize to int8
+    hv_q = torch.quantize_per_tensor(hv_tensor, scale=scale, zero_point=zero_point, dtype=torch.qint8)
 
-    return encoded_spectra
+    # Return the raw int8 data as a numpy array
+    return hv_q.int_repr().numpy()
 
 
 def _get_bucket_idx_list(
@@ -809,77 +696,63 @@ def hcluster_par_bucket(
 
 
 def cluster_spectra(
-    spectra_by_charge_df: pd.DataFrame,
+    spectra_by_charge_df,
     encoded_spectra_hv: np.ndarray,
-    config: Config,
-    logger: logging
+    config,
+    logger,
+    **kwargs
 ):
-    # Save data to shared memory
-    start = time.time()
-    
-    data_dict = {
-        'hv': encoded_spectra_hv, 
-        'prec_mz': np.vstack(spectra_by_charge_df.precursor_mz).astype(np.float32),
-        'rt_time': np.vstack(spectra_by_charge_df.retention_time).astype(np.float32)}
-    
-    ## Start clustering in GPU or CPU ##
-    bucket_idx_dict = schedule_bucket(spectra_by_charge_df, logger)
-    
-    cluster_device = 'CPU'
-    if config.cluster_alg == 'dbscan':
-        if config.use_gpu_cluster:
-            # DBSCAN clustering on GPU
-            cluster_func = cuml.DBSCAN(
-                eps=config.eps, min_samples=2, metric='precomputed',
-                calc_core_sample_indices=False, output_type='numpy')
+    """
+    Compute pairwise distances via AMX-accelerated matmul and cluster with DBSCAN.
+    """
+    # Convert int8 hypervectors back to float for distance computation
+    # (We simulate dequantization by casting to float32)
+    hv_int8 = torch.from_numpy(encoded_spectra_hv.astype(np.int8))
+    hv_fp = hv_int8.to(torch.float32)
 
-            cluster_device = 'GPU'
+    # Re-quantize for AMX matmul
+    max_val = hv_fp.abs().max().item()
+    scale = max_val / 127.0 if max_val != 0 else 1.0
+    zero_point = 0
+    a_q = torch.quantize_per_tensor(hv_fp, scale=scale, zero_point=zero_point, dtype=torch.qint8)
+    b_q = a_q  # same data for self-matmul
+
+    # Perform AMX-accelerated matrix multiply
+    q_f = QFunctional()
+    c_q = q_f.matmul(a_q, b_q.T)
+
+    # Dequantize result to float32 dot-product matrix
+    dot_mat = c_q.dequantize().numpy()
+
+    # Compute pairwise cosine distance: dist = 1 - (hv_i·hv_j) / (||hv_i|| * ||hv_j||)
+    norms = np.linalg.norm(hv_fp.numpy(), axis=1)
+    denom = np.outer(norms, norms)
+    cosine_sim = dot_mat / denom
+    dist_mat = 1.0 - cosine_sim
+
+    # Run DBSCAN with precomputed distances
+    db = DBSCAN(
+        eps=config.eps,
+        min_samples=getattr(config, 'min_samples', 2),
+        metric='precomputed',
+        n_jobs=getattr(config, 'cpu_core_cluster', 1)
+    )
+    labels = db.fit_predict(dist_mat)
+
+    # Build representative mask (medoid per cluster)
+    unique_labels = np.unique(labels)
+    representative_mask = np.zeros(len(labels), dtype=bool)
+    for lbl in unique_labels:
+        idx = np.where(labels == lbl)[0]
+        if lbl == -1:
+            # noise: mark all as representatives
+            representative_mask[idx] = True
         else:
-            # DBSCAN clustering on CPU
-            cluster_func = DBSCAN(eps=config.eps, min_samples=2, metric='precomputed', n_jobs=config.cpu_core_cluster)
+            sub = dist_mat[np.ix_(idx, idx)]
+            medoid = idx[np.argmin(sub.mean(axis=1))]
+            representative_mask[medoid] = True
 
-        cluster_results = [cluster_bucket(
-            bucket_slice = b_slice_i, 
-            data_dict = data_dict,
-            config = config,
-            cluster_func = cluster_func,
-            output_type = 'cupy' if config.use_gpu_cluster else 'numpy') 
-            for b_slice_i in tqdm(bucket_idx_dict['sort_bucket_idx_arr'])]
-        
-    elif config.cluster_alg in ['hc_single', 'hc_complete', 'hc_average']:
-        with Parallel(n_jobs=config.cpu_core_cluster) as parallel:
-            cluster_results = parallel(delayed(hcluster_par_bucket)(
-                b_slice_i, 
-                data_dict['hv'][b_slice_i[0]: b_slice_i[1]+1],
-                data_dict['prec_mz'][b_slice_i[0]: b_slice_i[1]+1],
-                data_dict['rt_time'][b_slice_i[0]: b_slice_i[1]+1],
-                config.cluster_alg[3:], config.precursor_tol, config.eps, config.rt_tol, 'numpy')
-                    for b_slice_i in tqdm(bucket_idx_dict['sort_bucket_idx_arr']))
-                   
-        # cluster_results = [hcluster_bucket(
-        #     bucket_slice=b_slice_i, 
-        #     data_dict=data_dict,
-        #     linkage=config.cluster_alg[3:],
-        #     config=config, 
-        #     output_type='numpy') 
-        #     for b_slice_i in tqdm(bucket_idx_dict['sort_bucket_idx_arr'])]
-        
-    else:
-        raise Exception("Error clustering algorithm: " + config.cluster_alg)
- 
- 
-    # Re-order cluster results
-    cluster_results = [cluster_results[i] for i in bucket_idx_dict['reorder_idx']]
-    
-    cluster_labels = [res_i[0] for res_i in cluster_results]
-    cluster_labels = assign_unique_cluster_labels(cluster_labels)
-    cluster_labels = np.hstack(cluster_labels)
-        
-    representative_mask = np.hstack([res_i[1] for res_i in cluster_results])
-    
-    logger.info("{} clustering in {:.4f} s".format(cluster_device, time.time()-start))
-
-    return cluster_labels, representative_mask
+    return labels, representative_mask
 
 
     
