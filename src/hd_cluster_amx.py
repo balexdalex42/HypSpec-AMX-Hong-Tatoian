@@ -506,8 +506,12 @@ def encode_spectra(
     **kwargs
 ) -> np.ndarray:
     """
-    AMX-compatible version of encode_spectra: skips bit-packing and works with float32 HDCs, then quantizes to int8.
+    AMX-compatible version of encode_spectra: skips bit-packing,
+    works with float32 HDCs, then quantizes to int8, and logs timing.
     """
+    # Start timing
+    start_time = time.time()
+
     # Step 1: Calculate binning and HD parameters
     bin_len, min_mz, _ = get_dim(config.min_mz, config.max_mz, config.fragment_tol)
 
@@ -520,14 +524,12 @@ def encode_spectra(
     id_hvs = cp.asnumpy(id_hvs).reshape((bin_len, config.hd_dim))
 
     # Step 4: Binning spectra arrays
-    # spectra_mz: shape (N, M), spectra_intensity: shape (N, M)
     bin_idx = np.floor((spectra_mz - min_mz) / config.fragment_tol).astype(int)
 
     # Step 5: Encode into dense float32 HDCs
     N, M = spectra_intensity.shape
     D = config.hd_dim
     hv_matrix = np.zeros((N, D), dtype=np.float32)
-
     for i in range(N):
         for j in range(M):
             fv = spectra_intensity[i, j]
@@ -544,7 +546,12 @@ def encode_spectra(
     zero_point = 0
     hv_q = torch.quantize_per_tensor(hv_tensor, scale=scale, zero_point=zero_point, dtype=torch.qint8)
 
+    # End timing and log
+    elapsed = time.time() - start_time
+    logger.info(f"AMX encode_spectra: encoded {N} spectra in {elapsed:.4f}s")
+
     return hv_q.int_repr().numpy().astype(np.int8)
+
 
 
 
