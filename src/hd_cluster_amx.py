@@ -352,7 +352,7 @@ def get_dim(min_mz: float, max_mz: float, bin_size: float) \
 
 # @nb.jit(cache=True)
 def _to_csr_vector(
-    spectra: np.ndarray,
+    spectra: pd.DataFrame,
     min_mz: float,
     bin_size: float
 ) -> Tuple[np.ndarray, np.ndarray]:
@@ -506,42 +506,43 @@ def encode_spectra(
     **kwargs
 ) -> np.ndarray:
     """
-    AMX-compatible version of encode_spectra: skips bit-packing and works with float32 HDCs.
+    AMX-compatible encode: calls original GPU encode, then quantizes to int8 and logs timing.
     """
-    # Step 1: Calculate binning and HD parameters
-    bin_len, min_mz, max_mz = get_dim(config.min_mz, config.max_mz, config.fragment_tol)
+    # Import original GPU-based encode
+    from hd_cluster import encode_spectra as orig_encode
 
-    # Step 2: Generate LV and ID HDCs in float32
-    lv_hvs = gen_lvs(config.hd_dim, config.hd_Q)
-    id_hvs = gen_idhvs(config.hd_dim, bin_len, config.hd_id_flip_factor)
+    # Start timing
+    start_time = time.time()
 
-    # Step 3: Convert CuPy -> NumPy float32
-    lv_hvs = lv_hvs.reshape((config.hd_Q + 1, config.hd_dim))
-    id_hvs = id_hvs.reshape((bin_len, config.hd_dim))
+    # Generate full-precision HDCs
+    hv_full = orig_encode(
+        spectra_mz=spectra_mz,
+        spectra_intensity=spectra_intensity,
+        config=config,
+        logger=logger
+    )  # e.g., numpy array of float32 or uint32
 
-    # Step 4: Binning spectra
-    intensity, mz = _to_csr_vector(spectra_intensity, min_mz, config.fragment_tol)
+    # Convert to float32 for quantization
+    hv_fp = hv_full.astype(np.float32)
 
-    # Step 5: Encode into dense float32 HDCs
-    N = intensity.shape[0]
-    D = config.hd_dim
-    hv_matrix = np.zeros((N, D), dtype=np.float32)
+    # Create torch tensor
+    hv_tensor = torch.tensor(hv_fp, dtype=torch.float32)
 
-    for i in range(N):
-        for j in range(intensity.shape[1]):
-            if intensity[i, j] != -1:
-                level_idx = int(intensity[i, j] * config.hd_Q)
-                if 0 <= level_idx < config.hd_Q + 1:
-                    hv_matrix[i] += lv_hvs[level_idx] * id_hvs[mz[i, j]]
-
-    # Step 6: Quantize to int8
-    hv_tensor = torch.tensor(hv_matrix, dtype=torch.float32)
+    # Compute quantization parameters
     max_val = hv_tensor.abs().max().item()
     scale = max_val / 127.0 if max_val != 0 else 1.0
     zero_point = 0
+
+    # Quantize to int8
     hv_q = torch.quantize_per_tensor(hv_tensor, scale=scale, zero_point=zero_point, dtype=torch.qint8)
 
-    return hv_q.int_repr().numpy()
+    # End timing
+    elapsed = time.time() - start_time
+    logger.info(f"AMX encode_spectra: encoded {hv_q.shape[0]} spectra in {elapsed:.4f}s  (quantized to int8)")
+
+    # Return int8 array
+    return hv_q.int_repr().numpy().astype(np.int8)
+
 
 
 def _get_bucket_idx_list(
