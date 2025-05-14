@@ -352,17 +352,15 @@ def get_dim(min_mz: float, max_mz: float, bin_size: float) \
 
 # @nb.jit(cache=True)
 def _to_csr_vector(
-    spectra: pd.DataFrame, 
-    min_mz: float, 
+    spectra: np.ndarray,
+    min_mz: float,
     bin_size: float
-    ) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray]:
     mz = spectra['mz'].to_numpy()
     intensity = spectra['intensity'].to_numpy()
-
-    mz = np.floor((np.vstack(mz)-min_mz)/bin_size)
+    mz = np.floor((np.vstack(mz) - min_mz) / bin_size).astype(int)
     intensity = np.vstack(intensity)
-
-    return intensity, mz 
+    return intensity, mz
 
 
 def encode_cluster_spectra(
@@ -503,38 +501,46 @@ def encode_preprocessed_spectra(
 def encode_spectra(
     spectra_mz: np.ndarray,
     spectra_intensity: np.ndarray,
-    config,
-    logger,
+    config: Config,
+    logger: logging.Logger,
     **kwargs
 ) -> np.ndarray:
     """
-    Encode spectra into hypervectors and quantize to int8 for AMX testing.
+    AMX-compatible version of encode_spectra: skips bit-packing and works with float32 HDCs.
     """
-    # Import the original encoder
-    from hd_cluster import encode_spectra as orig_encode
+    # Step 1: Calculate binning and HD parameters
+    bin_len, min_mz, max_mz = get_dim(config.min_mz, config.max_mz, config.fragment_tol)
 
-    # Generate the float32 hypervectors
-    hv = orig_encode(
-        spectra_mz=spectra_mz,
-        spectra_intensity=spectra_intensity,
-        config=config,
-        logger=logger,
-        output_type='float',
-        **kwargs
-    )  # shape: (N, D)
+    # Step 2: Generate LV and ID HDCs in float32
+    lv_hvs = gen_lvs(config.hd_dim, config.hd_Q)
+    id_hvs = gen_idhvs(config.hd_dim, bin_len, config.hd_id_flip_factor)
 
-    # Convert to torch tensor
-    hv_tensor = torch.tensor(hv, dtype=torch.float32)
+    # Step 3: Convert CuPy -> NumPy float32
+    lv_hvs = cp.asnumpy(lv_hvs).reshape((config.hd_Q + 1, config.hd_dim))
+    id_hvs = cp.asnumpy(id_hvs).reshape((bin_len, config.hd_dim))
 
-    # Determine quantization parameters
+    # Step 4: Binning spectra
+    intensity, mz = _to_csr_vector(spectra_intensity, min_mz, config.fragment_tol)
+
+    # Step 5: Encode into dense float32 HDCs
+    N = intensity.shape[0]
+    D = config.hd_dim
+    hv_matrix = np.zeros((N, D), dtype=np.float32)
+
+    for i in range(N):
+        for j in range(intensity.shape[1]):
+            if intensity[i, j] != -1:
+                level_idx = int(intensity[i, j] * config.hd_Q)
+                if 0 <= level_idx < config.hd_Q + 1:
+                    hv_matrix[i] += lv_hvs[level_idx] * id_hvs[mz[i, j]]
+
+    # Step 6: Quantize to int8
+    hv_tensor = torch.tensor(hv_matrix, dtype=torch.float32)
     max_val = hv_tensor.abs().max().item()
     scale = max_val / 127.0 if max_val != 0 else 1.0
     zero_point = 0
-
-    # Quantize to int8
     hv_q = torch.quantize_per_tensor(hv_tensor, scale=scale, zero_point=zero_point, dtype=torch.qint8)
 
-    # Return the raw int8 data as a numpy array
     return hv_q.int_repr().numpy()
 
 
