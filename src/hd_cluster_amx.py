@@ -519,7 +519,7 @@ def encode_spectra(
         spectra_intensity=spectra_intensity,
         config=config,
         logger=logger,
-        output_type='numpy',
+        output_type='float',
         **kwargs
     )  # shape: (N, D)
 
