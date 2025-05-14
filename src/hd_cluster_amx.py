@@ -38,7 +38,7 @@ def gen_lvs(D: int, Q: int):
         li = np.copy(l0)
         li[:flip] = l0[:flip] * -1
         levels.append(list(li))
-    return cp.array(levels, dtype=cp.float32).ravel()
+    return np.array(levels, dtype=np.float32).ravel()
 
 
 def gen_idhvs(D: int, totalFeatures: int, flip_factor: float):
@@ -56,7 +56,7 @@ def gen_idhvs(D: int, totalFeatures: int, flip_factor: float):
         bases[idx_to_flip] *= (-1)
         generated_hvs.append(copy.copy(bases))
 
-    return cp.array(generated_hvs, dtype=cp.float32).ravel()
+    return np.array(generated_hvs, dtype=np.float32).ravel()
 
 
 def gen_lv_id_hvs(
@@ -107,13 +107,13 @@ def cuda_bit_packing(orig_vecs, N, D):
 
     return packed_vecs.reshape(N, pack_len)
 
-
 def hd_encode_spectra_packed(spectra_intensity, spectra_mz, id_hvs_packed, lv_hvs_packed, N, D, Q, output_type):
     packed_dim = (D + 32 - 1) // 32
     encoded_spectra = cp.zeros(N * packed_dim, dtype=cp.uint32)
     
     max_peaks_used = spectra_intensity.shape[1]
     spectra_intensity = cp.array(spectra_intensity, dtype=cp.float32).ravel()
+    
     spectra_mz = cp.array(spectra_mz, dtype=cp.int32).ravel()
     
     hd_enc_lvid_packed_cuda_kernel = cp.RawKernel(r'''
@@ -516,8 +516,8 @@ def encode_spectra(
     id_hvs = gen_idhvs(config.hd_dim, bin_len, config.hd_id_flip_factor)
 
     # Step 3: Convert CuPy -> NumPy float32
-    lv_hvs = cp.asnumpy(lv_hvs).reshape((config.hd_Q + 1, config.hd_dim))
-    id_hvs = cp.asnumpy(id_hvs).reshape((bin_len, config.hd_dim))
+    lv_hvs = lv_hvs.reshape((config.hd_Q + 1, config.hd_dim))
+    id_hvs = id_hvs.reshape((bin_len, config.hd_dim))
 
     # Step 4: Binning spectra
     intensity, mz = _to_csr_vector(spectra_intensity, min_mz, config.fragment_tol)
