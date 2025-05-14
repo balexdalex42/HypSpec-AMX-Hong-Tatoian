@@ -499,50 +499,53 @@ def encode_preprocessed_spectra(
 
 
 def encode_spectra(
-    spectra_df: pd.DataFrame,
+    spectra_mz: np.ndarray,
+    spectra_intensity: np.ndarray,
     config: Config,
     logger: logging.Logger,
     **kwargs
 ) -> np.ndarray:
     """
-    AMX-compatible version of encode_spectra: skips bit-packing and works with float32 HDCs,
-    then quantizes to int8 for AMX matmul.
+    AMX-compatible version of encode_spectra: skips bit-packing and works with float32 HDCs, then quantizes to int8.
     """
     # Step 1: Calculate binning and HD parameters
-    bin_len, min_mz, max_mz = get_dim(config.min_mz, config.max_mz, config.fragment_tol)
+    bin_len, min_mz, _ = get_dim(config.min_mz, config.max_mz, config.fragment_tol)
 
-    # Step 2: Generate LV and ID HDCs in float32 (NumPy only)
+    # Step 2: Generate LV and ID HDCs in float32
     lv_hvs = gen_lvs(config.hd_dim, config.hd_Q)
     id_hvs = gen_idhvs(config.hd_dim, bin_len, config.hd_id_flip_factor)
 
-    # Step 3: Convert to NumPy float32
-    lv_hvs = np.array(lv_hvs.get() if hasattr(lv_hvs, "get") else lv_hvs, dtype=np.float32).reshape((config.hd_Q + 1, config.hd_dim))
-    id_hvs = np.array(id_hvs.get() if hasattr(id_hvs, "get") else id_hvs, dtype=np.float32).reshape((bin_len, config.hd_dim))
+    # Step 3: Convert CuPy -> NumPy float32
+    lv_hvs = cp.asnumpy(lv_hvs).reshape((config.hd_Q + 1, config.hd_dim))
+    id_hvs = cp.asnumpy(id_hvs).reshape((bin_len, config.hd_dim))
 
-    # Step 4: Binning spectra
-    intensity, mz = _to_csr_vector(spectra_df, min_mz, config.fragment_tol)
+    # Step 4: Binning spectra arrays
+    # spectra_mz: shape (N, M), spectra_intensity: shape (N, M)
+    bin_idx = np.floor((spectra_mz - min_mz) / config.fragment_tol).astype(int)
 
     # Step 5: Encode into dense float32 HDCs
-    N = intensity.shape[0]
+    N, M = spectra_intensity.shape
     D = config.hd_dim
     hv_matrix = np.zeros((N, D), dtype=np.float32)
 
     for i in range(N):
-        for j in range(intensity.shape[1]):
-            if intensity[i, j] != -1:
-                level_idx = int(intensity[i, j] * config.hd_Q)
-                if 0 <= level_idx < config.hd_Q + 1 and 0 <= mz[i, j] < bin_len:
-                    hv_matrix[i] += lv_hvs[level_idx] * id_hvs[mz[i, j]]
+        for j in range(M):
+            fv = spectra_intensity[i, j]
+            if fv != -1:
+                level_idx = int(fv * config.hd_Q)
+                idx = bin_idx[i, j]
+                if 0 <= level_idx < config.hd_Q + 1 and 0 <= idx < bin_len:
+                    hv_matrix[i] += lv_hvs[level_idx] * id_hvs[idx]
 
-    # Step 6: Quantize to int8 for AMX
+    # Step 6: Quantize to int8
     hv_tensor = torch.tensor(hv_matrix, dtype=torch.float32)
     max_val = hv_tensor.abs().max().item()
     scale = max_val / 127.0 if max_val != 0 else 1.0
     zero_point = 0
     hv_q = torch.quantize_per_tensor(hv_tensor, scale=scale, zero_point=zero_point, dtype=torch.qint8)
 
-    # Return as np.int8 for AMX matmul
     return hv_q.int_repr().numpy().astype(np.int8)
+
 
 
 def _get_bucket_idx_list(

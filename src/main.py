@@ -81,13 +81,20 @@ def main(args: Union[str, List[str]] = None) -> int:
         #     spectra_mz=spectra_mz, spectra_intensity=spectra_intensity, config=config, logger=logger) old
         #NEW
         if config.amx:
-            # AMX expects a DataFrame
+            # AMX also expects raw arrays, not a DataFrame
             spectra_hvs = hd_cluster_amx.encode_spectra(
-                spectra_df=spectra_meta_df, config=config, logger=logger)
+                spectra_mz=spectra_mz,
+                spectra_intensity=spectra_intensity,
+                config=config,
+                logger=logger
+            )
         else:
-            # GPU expects arrays
             spectra_hvs = hd_cluster.encode_spectra(
-                spectra_mz=spectra_mz, spectra_intensity=spectra_intensity, config=config, logger=logger)
+                spectra_mz=spectra_mz,
+                spectra_intensity=spectra_intensity,
+                config=config,
+                logger=logger
+            )
             
 
         # Save meta and encoding data
