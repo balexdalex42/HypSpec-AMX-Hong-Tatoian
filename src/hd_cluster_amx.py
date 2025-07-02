@@ -725,7 +725,7 @@ def cluster_spectra(
     b_q = a_q  # same data for self-matmul
 
     # Perform AMX-accelerated matrix multiply
-    q_f = QFunctional()
+    q_f = torch.ao.nn.quantized.QFunctional()
     c_q = q_f.matmul(a_q, b_q.T)
 
     # Dequantize result to float32 dot-product matrix
