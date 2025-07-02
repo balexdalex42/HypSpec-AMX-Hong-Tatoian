@@ -73,9 +73,9 @@ def gen_lv_id_hvs(
         lv_hvs, id_hvs = data['lv_hvs'], data['id_hvs']
     else:
         lv_hvs = gen_lvs(D, Q)
-        lv_hvs = cuda_bit_packing(lv_hvs, Q+1, D)
+        # lv_hvs = cuda_bit_packing(lv_hvs, Q+1, D)
         id_hvs = gen_idhvs(D, bin_len, id_flip_factor)
-        id_hvs = cuda_bit_packing(id_hvs, bin_len, D)
+        # id_hvs = cuda_bit_packing(id_hvs, bin_len, D) #no bit packing allowed
         cp.savez(lv_id_hvs_file, lv_hvs=lv_hvs, id_hvs=id_hvs)
     return lv_hvs, id_hvs
 
