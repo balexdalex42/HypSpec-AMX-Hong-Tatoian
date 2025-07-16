@@ -12,7 +12,7 @@ from numba import cuda
 from numba.typed import List
 from typing import Callable, Iterator, List, Optional, Tuple
 
-import cupy as cp
+# import cupy as cp
 import cuml, rmm
 rmm.reinitialize(pool_allocator=False, managed_memory=True)
 
