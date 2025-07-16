@@ -15,8 +15,9 @@ from numba.typed import List
 from typing import Callable, Iterator, List, Optional, Tuple
 
 # import cupy as cp
-import cuml, rmm
-rmm.reinitialize(pool_allocator=False, managed_memory=True)
+#import cuml, rmm
+
+#rmm.reinitialize(pool_allocator=False, managed_memory=True)
 
 import pandas as pd
 import scipy.sparse as ss
@@ -786,9 +787,9 @@ def cluster_encoded_spectra(
     if config.cluster_alg == 'dbscan':
         if config.use_gpu_cluster:
             # DBSCAN clustering on GPU
-            cluster_func = cuml.DBSCAN(
-                eps=config.eps, min_samples=2, metric='precomputed',
-                calc_core_sample_indices=False, output_type='numpy')
+            # cluster_func = cuml.DBSCAN(
+            #     eps=config.eps, min_samples=2, metric='precomputed',
+            #     calc_core_sample_indices=False, output_type='numpy')
 
             cluster_device = 'GPU'
         else:
