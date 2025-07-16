@@ -3,7 +3,7 @@ from tqdm import tqdm
 
 
 import numpy as np
-
+cp = np
 
 np.random.seed(0)
 
