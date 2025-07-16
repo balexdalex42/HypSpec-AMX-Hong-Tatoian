@@ -177,14 +177,14 @@ def hd_encode_spectra_packed(spectra_intensity, spectra_mz, id_hvs_packed, lv_hv
         return encoded_spectra.reshape(N, packed_dim)
 
 
-@cuda.jit('float32(uint32, uint32)', device=True, inline=True)
+# @cuda.jit('float32(uint32, uint32)', device=True, inline=True)
 def fast_hamming_op(a, b):
     return nb.float32(cuda.libdevice.popc(a^b))
 
 TPB = 32
 TPB1 = 33
 
-@cuda.jit('void(uint32[:,:], float32[:,:], float32[:], float32, int32, int32)')
+# @cuda.jit('void(uint32[:,:], float32[:,:], float32[:], float32, int32, int32)')
 def fast_pw_dist_cosine_mask_packed(A, D, prec_mz, prec_tol, N, pack_len):
     """
         Pair-wise cosine distance
@@ -259,7 +259,7 @@ def fast_nb_cosine_dist_mask(hvs, prec_mz, prec_tol, output_type, stream=None):
 
 
 # Condense pw_dist computation function with improved performance
-@cuda.jit('void(uint32[:,:], float32[:], float32[:], float32, int32, int32)')
+# @cuda.jit('void(uint32[:,:], float32[:], float32[:], float32, int32, int32)')
 def fast_pw_dist_cosine_mask_packed_condense(A, D, prec_mz, prec_tol, N, pack_len):
     """
         Pair-wise cosine distance
@@ -899,7 +899,7 @@ def assign_unique_cluster_labels(bucket_cluster_labels):
     return reorder_labels
 
 
-@nb.njit
+# @nb.njit
 def _get_cluster_group_idx(clusters: np.ndarray) -> Iterator[Tuple[int, int]]:
     """
     Get start and stop indexes for unique cluster labels.
@@ -1005,7 +1005,7 @@ def _postprocess_cluster(
     return n_clusters
 
 
-@nb.njit(cache=True, fastmath=True)
+# @nb.njit(cache=True, fastmath=True)
 def _linkage(
     values: np.ndarray, 
     tol_mode: str = None
@@ -1050,7 +1050,7 @@ def _linkage(
     return linkage
 
 
-@nb.njit(cache=True)
+# @nb.njit(cache=True)
 def _assign_unique_cluster_labels(
     cluster_labels: np.ndarray,
     group_idx: nb.typed.List,
