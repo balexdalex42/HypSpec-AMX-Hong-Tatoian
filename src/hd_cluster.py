@@ -174,50 +174,36 @@ def cuda_bit_packing(orig_vecs, N, D):
 #         return encoded_spectra.reshape(N, packed_dim)
 
 def hd_encode_spectra_packed(spectra_intensity, spectra_mz, id_hvs_packed, lv_hvs_packed, N, D, Q, output_type):
+    def hd_encode_spectra_numpy(spectra_intensity, spectra_mz, id_hvs, lv_hvs, N, D, Q, output_type='numpy'):
     packed_dim = (D + 31) // 32
     encoded_spectra = np.zeros((N, packed_dim), dtype=np.uint32)
-
-    max_peaks_used = spectra_intensity.shape[1]
-
+    
     for sample_idx in range(N):
-        sample_encoding = np.zeros(D, dtype=np.float32)
-
-        for peak_idx in range(max_peaks_used):
-            mz = spectra_mz[sample_idx, peak_idx]
+        hv = np.zeros(D, dtype=np.float32)
+        for peak_idx in range(spectra_intensity.shape[1]):
             intensity = spectra_intensity[sample_idx, peak_idx]
-
+            mz = spectra_mz[sample_idx, peak_idx]
             if intensity == -1:
                 continue
+            
+            # Scale intensity to index into lv_hvs
+            level_idx = min(int(intensity * Q), Q - 1)
+            
+            # Element-wise product of ID and level HV
+            id_vec = id_hvs[mz]
+            lv_vec = lv_hvs[level_idx]
+            hv += id_vec * lv_vec
 
-            level_idx = int(intensity * Q)
-            # Get packed vectors and unpack to bits
-            lv_vector = lv_hvs_packed[level_idx]  # shape: (packed_dim,)
-            id_vector = id_hvs_packed[mz]         # shape: (packed_dim,)
-
-            # Unpack to binary [-1, +1]
-            lv_bits = unpack_bits_to_pm1(lv_vector, D)
-            id_bits = unpack_bits_to_pm1(id_vector, D)
-
-            sample_encoding += lv_bits * id_bits
-
-        # Convert accumulated vector to binary: threshold > 0 → 1, else 0
-        bit_array = (sample_encoding > 0).astype(np.uint32)
-
+        # Threshold to binary {-1, +1}, then bit-pack
+        bits = (hv > 0).astype(np.uint32)
         for d in range(D):
-            if bit_array[d]:
-                encoded_spectra[sample_idx, d // 32] |= (1 << (31 - d % 32))
+            if bits[d]:
+                encoded_spectra[sample_idx, d // 32] |= (1 << (31 - (d % 32)))
 
-    return encoded_spectra if output_type == 'numpy' else None
-
-def unpack_bits_to_pm1(packed_vec, D):
-    """Unpacks a packed binary vector to an array of -1 and +1."""
-    unpacked = np.zeros(D, dtype=np.int8)
-    for i in range(D):
-        word_idx = i // 32
-        bit_idx = 31 - (i % 32)
-        bit = (packed_vec[word_idx] >> bit_idx) & 1
-        unpacked[i] = 1 if bit else -1
-    return unpacked
+    if output_type == 'numpy':
+        return encoded_spectra
+    else:
+        raise ValueError("Only 'numpy' output_type supported in NumPy version.")
 
 
 # @cuda.jit('float32(uint32, uint32)', device=True, inline=True)
