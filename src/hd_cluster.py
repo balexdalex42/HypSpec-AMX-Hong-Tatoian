@@ -173,7 +173,7 @@ def cuda_bit_packing(orig_vecs, N, D):
 #     elif output_type=='cupy':
 #         return encoded_spectra.reshape(N, packed_dim)
 
-def hd_encode_spectra_packed(spectra_intensity, spectra_mz, id_hvs_packed, lv_hvs_packed, N, D, Q, output_type):
+def hd_encode_spectra_packed(spectra_intensity, spectra_mz, id_hvs, lv_hvs, N, D, Q, output_type):
     packed_dim = (D + 31) // 32
     encoded_spectra = np.zeros((N, packed_dim), dtype=np.uint32)
     
