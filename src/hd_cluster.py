@@ -561,8 +561,8 @@ def encode_spectra(
     lv_hvs, id_hvs = gen_lv_id_hvs(config.hd_dim, config.hd_Q, bin_len, config.hd_id_flip_factor, logger)
     
     data_dict = {
-        'lv_hvs': cp.asnumpy(lv_hvs).ravel(), 
-        'id_hvs': cp.asnumpy(id_hvs).ravel(), 
+        'lv_hvs': lv_hvs.ravel(), 
+        'id_hvs': id_hvs.ravel(), 
         'intensity': spectra_intensity, 'mz': spectra_mz}
 
     num_spectra = spectra_mz.shape[0]
