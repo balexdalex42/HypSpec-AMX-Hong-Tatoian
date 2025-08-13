@@ -626,7 +626,11 @@ def load_process_spectra_parallel(
 
     parse_time = time.time() - start
     logger.info("Load and process {} spectra in {:.4f}s".format(len(spectra_meta_df), parse_time))
-    
+    #note:
+    #Spectra MZ Shape: (1370796, 50)
+    # Spectra meta df: (1370796, 6)
+    # intensity: (1370796, 50)
+
     return spectra_meta_df, spectra_mz, spectra_intensity
 
 

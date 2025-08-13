@@ -544,7 +544,12 @@ def encode_spectra(
     bin_len, min_mz, max_mz = get_dim(config.min_mz, config.max_mz, config.fragment_tol)
     
     lv_hvs, id_hvs = gen_lv_id_hvs(config.hd_dim, config.hd_Q, bin_len, config.hd_id_flip_factor, logger)
-    
+    #for debugging
+    print("lv_hvs shape:". lv_hvs.shape)
+    print(lv_hvs)
+    print("id_hvs shape:", id_hvs.shape)
+    print(id_hvs)
+
     data_dict = {
         'lv_hvs': lv_hvs.ravel(), 
         'id_hvs': id_hvs.ravel(), 
