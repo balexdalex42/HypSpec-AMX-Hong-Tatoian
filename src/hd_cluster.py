@@ -479,7 +479,9 @@ def encode_func(
     intensity, mz = data_dict['intensity'][slice_idx[0]: slice_idx[1]], data_dict['mz'][slice_idx[0]: slice_idx[1]]
 
     lv_hvs, id_hvs = cp.array(data_dict['lv_hvs']), cp.array(data_dict['id_hvs'])
-
+    print(f"In encode func: shapes-> lv_hvs: {lv_hvs.shape} & id_hvs: {id_hvs.shape}")
+    # print(lv_hvs)
+    # print(id_hvs)
     batch_size = slice_idx[1] - slice_idx[0]
     
     return hd_encode_spectra_packed(intensity, mz, id_hvs, lv_hvs, batch_size, D, Q, output_type)
