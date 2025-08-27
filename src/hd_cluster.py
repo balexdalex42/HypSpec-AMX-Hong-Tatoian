@@ -11,7 +11,8 @@ import numba as nb
 from numba import cuda
 from numba.typed import List
 from typing import Callable, Iterator, List, Optional, Tuple
-
+import torch
+from intel_extension_for_pytorch import ipex
 # import cupy as cp
 #import cuml, rmm
 # rmm.reinitialize(pool_allocator=False, managed_memory=True)
@@ -173,37 +174,85 @@ def cuda_bit_packing(orig_vecs, N, D):
 #     elif output_type=='cupy':
 #         return encoded_spectra.reshape(N, packed_dim)
 
-def hd_encode_spectra_packed(spectra_intensity, spectra_mz, id_hvs, lv_hvs, N, D, Q, output_type):
-    packed_dim = (D + 31) // 32
-    encoded_spectra = np.zeros((N, packed_dim), dtype=np.uint32)
+# def hd_encode_spectra_packed(spectra_intensity, spectra_mz, id_hvs, lv_hvs, N, D, Q, output_type):
+#     spectra_intensity = torch.as_tensor(spectra_intensity, dtype=torch.float32)
+#     spectra_mz = torch.as_tensor(spectra_mz, dtype=torch.long)
     
-    for sample_idx in range(N):
-        hv = np.zeros(D, dtype=np.float32)
-        for peak_idx in range(spectra_intensity.shape[1]):
-            intensity = spectra_intensity[sample_idx, peak_idx]
-            mz = spectra_mz[sample_idx, peak_idx]
-            if intensity == -1:
-                continue
+#     packed_dim = (D + 31) // 32
+#     encoded_spectra = np.zeros((N, packed_dim), dtype=np.uint32)
+    
+#     for sample_idx in range(N):
+#         hv = torch.zeros((N, D), dtype=torch.int32)
+#         for peak_idx in range(spectra_intensity.shape[1]):
+#             intensity = spectra_intensity[sample_idx, peak_idx]
+#             mz = int(spectra_mz[sample_idx, peak_idx])
+#             if intensity == -1:
+#                 continue
             
-            # Scale intensity to index into lv_hvs
-            level_idx = min(int(intensity * Q), Q - 1)
+#             # Scale intensity to index into lv_hvs
+#             level_idx = min(int(intensity * Q), Q - 1)
             
-            # Element-wise product of ID and level HV
-            id_vec = id_hvs[mz]
-            lv_vec = lv_hvs[level_idx]
-            hv += id_vec * lv_vec
+#             # Element-wise product of ID and level HV
+#             id_vec = id_hvs[mz]
+#             lv_vec = lv_hvs[level_idx]
+#             hv += id_vec * lv_vec #now will take advantage of AVX
 
-        # Threshold to binary {-1, +1}, then bit-pack
-        bits = (hv > 0).astype(np.uint32)
-        for d in range(D):
-            if bits[d]:
-                encoded_spectra[sample_idx, d // 32] |= (1 << (31 - (d % 32)))
+#         # Threshold to binary {-1, +1}
+#         hv = torch.where(hv > 0, 1, -1)
+#         encoded_spectra[sample_idx] = hv.numpy()
+#         for d in range(D):
+#             if bits[d]:
+#                 encoded_spectra[sample_idx, d // 32] |= (1 << (31 - (d % 32)))
 
-    if output_type == 'numpy':
-        return encoded_spectra
-    else:
-        raise ValueError("Only 'numpy' output_type supported in NumPy version.")
+#     if output_type == 'numpy':
+#         return encoded_spectra
+#     else:
+#         raise ValueError("Only 'numpy' output_type supported in NumPy version.")
 
+def encode_spectra_ipex(
+    spectra_intensity: torch.Tensor,  # (N, P), float32
+    spectra_mz: torch.Tensor,         # (N, P), long
+    id_hvs: torch.Tensor,             # (num_bins, D), int8
+    lv_hvs: torch.Tensor,             # (Q, D), int8
+    Q: int,
+) -> torch.Tensor:
+    """
+    Encode spectra using IPEX-friendly int8 matmul.
+    Returns: (N, D) int8 tensor
+    """
+    # Move all tensors to the same device (trying to take advantage of ipex)
+    device = 'cpu' #for now
+    spectra_intensity = spectra_intensity.to(device)
+    spectra_mz = spectra_mz.to(device)
+    id_hvs = id_hvs.to(device)
+    lv_hvs = lv_hvs.to(device)
+
+    N, P = spectra_intensity.shape
+    D = id_hvs.shape[1]
+
+    # Scale intensity to level index
+    level_idx = torch.clamp((spectra_intensity * Q).long(), max=Q-1)
+
+    # Gather ID HVs and LV HVs
+    # Shape: (N, P, D)
+    id_vecs = id_hvs[spectra_mz]       # gather per m/z
+    lv_vecs = lv_hvs[level_idx]        # gather per intensity bin
+
+    # Convert to int32 for accumulation
+    id_vecs = id_vecs.to(torch.int32)
+    lv_vecs = lv_vecs.to(torch.int32)
+
+    # Elementwise multiply then sum across peaks → batched matmul
+    # Reshape: (N, D) = sum over P
+    hv = (id_vecs * lv_vecs).sum(dim=1)
+
+    # Threshold to {-1,+1} → int8
+    encoded = torch.where(hv > 0, 1, -1).to(torch.int8)
+
+    # Optimize for IPEX (fuses operations, enables AVX-512/AMX)
+    encoded = ipex.optimize(encoded, dtype=torch.int8)
+
+    return encoded
 
 # @cuda.jit('float32(uint32, uint32)', device=True, inline=True)
 def fast_hamming_op(a, b):
@@ -478,7 +527,8 @@ def encode_func(
 ) -> np.ndarray:
     intensity, mz = data_dict['intensity'][slice_idx[0]: slice_idx[1]], data_dict['mz'][slice_idx[0]: slice_idx[1]]
 
-    lv_hvs, id_hvs = cp.array(data_dict['lv_hvs']), cp.array(data_dict['id_hvs'])
+    # lv_hvs, id_hvs = cp.array(data_dict['lv_hvs']), cp.array(data_dict['id_hvs'])
+    lv_hvs, id_hvs = data_dict['lv_hvs'], data_dict['id_hvs']
     print(f"In encode func: shapes-> lv_hvs: {lv_hvs.shape} & id_hvs: {id_hvs.shape}")
     # print(lv_hvs)
     # print(id_hvs)
@@ -546,8 +596,11 @@ def encode_spectra(
     bin_len, min_mz, max_mz = get_dim(config.min_mz, config.max_mz, config.fragment_tol)
     
     lv_hvs, id_hvs = gen_lv_id_hvs(config.hd_dim, config.hd_Q, bin_len, config.hd_id_flip_factor, logger)
+    #turning into int8 for torch 
+    lv_hvs = torch.from_numpy(lv_hvs).to(torch.int8)
+    id_hvs = torch.from_numpy(id_hvs).to(torch.int8)
     #for debugging
-    print("lv_hvs shape:". lv_hvs.shape)
+    print("lv_hvs shape:", lv_hvs.shape)
     print(lv_hvs)
     print("id_hvs shape:", id_hvs.shape)
     print(id_hvs)

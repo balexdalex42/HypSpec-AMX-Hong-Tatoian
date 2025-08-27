@@ -6,7 +6,7 @@ import numpy as np
 cp = np
 import torch
 from torch.ao.nn.quantized import QFunctional
-
+from intel_extension_for_pytorch import ipex
 np.random.seed(0)
 
 import numba as nb
@@ -110,71 +110,71 @@ def cuda_bit_packing(orig_vecs, N, D):
     return packed_vecs.reshape(N, pack_len)
 
 
-# def hd_encode_spectra_packed(spectra_intensity, spectra_mz, id_hvs_packed, lv_hvs_packed, N, D, Q, output_type):
-#     packed_dim = (D + 32 - 1) // 32
-#     encoded_spectra = cp.zeros(N * packed_dim, dtype=cp.uint32)
+def hd_encode_spectra_packed(spectra_intensity, spectra_mz, id_hvs_packed, lv_hvs_packed, N, D, Q, output_type):
+    packed_dim = (D + 32 - 1) // 32
+    encoded_spectra = cp.zeros(N * packed_dim, dtype=cp.uint32)
     
-#     max_peaks_used = spectra_intensity.shape[1]
-#     spectra_intensity = cp.array(spectra_intensity, dtype=cp.float32).ravel()
-#     spectra_mz = cp.array(spectra_mz, dtype=cp.int32).ravel()
+    max_peaks_used = spectra_intensity.shape[1]
+    spectra_intensity = cp.array(spectra_intensity, dtype=cp.float32).ravel()
+    spectra_mz = cp.array(spectra_mz, dtype=cp.int32).ravel()
     
-#     hd_enc_lvid_packed_cuda_kernel = cp.RawKernel(r'''
-#                 __device__ float* get2df(float* p, const int x, int y, const int stride) {
-#                     return (float*)((char*)p + x*stride) + y;
-#                 }
-#                 __device__ char get2d_bin(unsigned int* p, const int i, const int DIM, const int d) {
-#                     unsigned int v = ((*(p + i * ((DIM + 32-1)/32) + d/32)) >> ((32-1) - d % 32)) & 0x01;
-#                     if (v == 0) {
-#                         return -1;
-#                     } else {
-#                         return 1;
-#                     }
-#                 }
-#                 extern "C" __global__
-#                 void hd_enc_lvid_packed_cuda(
-#                     unsigned int* __restrict__ id_hvs_packed, unsigned int* __restrict__ level_hvs_packed, 
-#                     int* __restrict__ feature_indices, float* __restrict__ feature_values, 
-#                     int max_peaks_used, unsigned int* hv_matrix, 
-#                     int N, int Q, int D, int packLength) {
-#                     const int d = threadIdx.x + blockIdx.x * blockDim.x;
-#                     if (d >= D)
-#                         return;
-#                     for (int sample_idx = blockIdx.y; sample_idx < N; sample_idx += blockDim.y * gridDim.y) 
-#                     {
-#                         // we traverse [start, end-1]
-#                         float encoded_hv_e = 0.0;
-#                         unsigned int start_range = sample_idx*max_peaks_used;
-#                         unsigned int end_range = (sample_idx + 1)*max_peaks_used;
-#                         #pragma unroll 1
-#                         for (int f = start_range; f < end_range; ++f) {
-#                             if(feature_values[f] != -1)
-#                                 encoded_hv_e += get2d_bin(level_hvs_packed, (int)(feature_values[f] * Q), D, d) * \
-#                                                 get2d_bin(id_hvs_packed, feature_indices[f], D, d);
-#                         }
+    hd_enc_lvid_packed_cuda_kernel = cp.RawKernel(r'''
+                __device__ float* get2df(float* p, const int x, int y, const int stride) {
+                    return (float*)((char*)p + x*stride) + y;
+                }
+                __device__ char get2d_bin(unsigned int* p, const int i, const int DIM, const int d) {
+                    unsigned int v = ((*(p + i * ((DIM + 32-1)/32) + d/32)) >> ((32-1) - d % 32)) & 0x01;
+                    if (v == 0) {
+                        return -1;
+                    } else {
+                        return 1;
+                    }
+                }
+                extern "C" __global__
+                void hd_enc_lvid_packed_cuda(
+                    unsigned int* __restrict__ id_hvs_packed, unsigned int* __restrict__ level_hvs_packed, 
+                    int* __restrict__ feature_indices, float* __restrict__ feature_values, 
+                    int max_peaks_used, unsigned int* hv_matrix, 
+                    int N, int Q, int D, int packLength) {
+                    const int d = threadIdx.x + blockIdx.x * blockDim.x;
+                    if (d >= D)
+                        return;
+                    for (int sample_idx = blockIdx.y; sample_idx < N; sample_idx += blockDim.y * gridDim.y) 
+                    {
+                        // we traverse [start, end-1]
+                        float encoded_hv_e = 0.0;
+                        unsigned int start_range = sample_idx*max_peaks_used;
+                        unsigned int end_range = (sample_idx + 1)*max_peaks_used;
+                        #pragma unroll 1
+                        for (int f = start_range; f < end_range; ++f) {
+                            if(feature_values[f] != -1)
+                                encoded_hv_e += get2d_bin(level_hvs_packed, (int)(feature_values[f] * Q), D, d) * \
+                                                get2d_bin(id_hvs_packed, feature_indices[f], D, d);
+                        }
                         
-#                         // hv_matrix[sample_idx*D+d] = (encoded_hv_e > 0)? 1 : -1;
-#                         int tid = threadIdx.x;
-#                         int lane = tid % warpSize;
-#                         int bitPattern=0;
-#                         if (d < D)
-#                             bitPattern = __ballot_sync(0xFFFFFFFF, encoded_hv_e > 0);
-#                         if (lane == 0) {
-#                             hv_matrix[sample_idx * packLength + (d / warpSize)] = bitPattern;
-#                         }
-#                     }
-#                 }
-#                 ''', 'hd_enc_lvid_packed_cuda')
+                        // hv_matrix[sample_idx*D+d] = (encoded_hv_e > 0)? 1 : -1;
+                        int tid = threadIdx.x;
+                        int lane = tid % warpSize;
+                        int bitPattern=0;
+                        if (d < D)
+                            bitPattern = __ballot_sync(0xFFFFFFFF, encoded_hv_e > 0);
+                        if (lane == 0) {
+                            hv_matrix[sample_idx * packLength + (d / warpSize)] = bitPattern;
+                        }
+                    }
+                }
+                ''', 'hd_enc_lvid_packed_cuda')
                 
-#     threads = 1024
-#     max_block = cp.cuda.runtime.getDeviceProperties(0)['maxGridSize'][1]
-#     hd_enc_lvid_packed_cuda_kernel(
-#         ((D + threads - 1) // threads, min(N, max_block)), (threads,), 
-#         (id_hvs_packed, lv_hvs_packed, spectra_mz, spectra_intensity, max_peaks_used, encoded_spectra, N, Q, D, packed_dim))
+    threads = 1024
+    max_block = cp.cuda.runtime.getDeviceProperties(0)['maxGridSize'][1]
+    hd_enc_lvid_packed_cuda_kernel(
+        ((D + threads - 1) // threads, min(N, max_block)), (threads,), 
+        (id_hvs_packed, lv_hvs_packed, spectra_mz, spectra_intensity, max_peaks_used, encoded_spectra, N, Q, D, packed_dim))
 
-#     if output_type=='numpy':
-#         return encoded_spectra.reshape(N, packed_dim).get()
-#     elif output_type=='cupy':
-#         return encoded_spectra.reshape(N, packed_dim)
+    if output_type=='numpy':
+        return encoded_spectra.reshape(N, packed_dim).get()
+    elif output_type=='cupy':
+        return encoded_spectra.reshape(N, packed_dim)
 
 def hd_encode_spectra_packed(spectra_intensity, spectra_mz, id_hvs_packed, lv_hvs_packed, N, D, Q, output_type):
     packed_dim = (D + 31) // 32
