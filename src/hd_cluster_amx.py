@@ -26,6 +26,8 @@ from joblib import Parallel, delayed
 #CHANGE USING TORCH
 import torch
 import intel_extension_for_pytorch as ipex
+import torch.nn as nn
+import torch.quantization
 
 
 def gen_lvs(D: int, Q: int):
@@ -80,7 +82,7 @@ def gen_lv_id_hvs(
     return lv_hvs, id_hvs
 
 #we perform hd encoding from non-packed hv's and return non-packed hv batch
-def hd_encode_spectra(spectra_intensity, spectra_mz, id_hvs, lv_hvs, N, D, Q, output_type):
+def hd_encode_spectra(spectra_intensity, spectra_mz, id_hvs, lvl_hvs, N, D, Q, output_type):
     encoded_spectra = torch.zeros((N, D), dtype=torch.bfloat16)
 
     max_peaks_used = spectra_intensity.shape[1]
@@ -93,12 +95,12 @@ def hd_encode_spectra(spectra_intensity, spectra_mz, id_hvs, lv_hvs, N, D, Q, ou
 
     #turning id_hvs to matrix to access it's components better in the loop
     id_hvs_num_samples = (id_hvs.shape[0] +  D - 1) // D #should work without the D - 1 added to id_hvs
-    id_hvs = id_hvs.copy().reshape(id_hvs_num_samples, D)
-    id_hvs = torch.from_numpy(id_hvs).to(torch.bfloat16) #convert numpy matrix to torch so we can take advantage of AVX-512
+    id_hvs_t = id_hvs.reshape(id_hvs_num_samples, D)
+    id_hvs_t = torch.from_numpy(id_hvs_t).to(torch.bfloat16) #convert numpy matrix to torch so we can take advantage of AVX-512
     #doing the same for lv_hvs
-    lvl_hvs_num_samples = (id_hvs.shape[0] +  D - 1) // D #should work without the D - 1 added to id_hvs
-    lvl_hvs = lvl_hvs.copy().reshape(lvl_hvs_num_samples, D)
-    lvl_hvs = torch.from_numpy(lvl_hvs).to(torch.bfloat16)
+    lvl_hvs_num_samples = Q
+    lvl_hvs_t = lvl_hvs.reshape(lvl_hvs_num_samples, D)
+    lvl_hvs = torch.from_numpy(lvl_hvs_t).to(torch.bfloat16)
     for sample_idx in range(N):
         #Get blank encoded hyper vector
         enc_hv = torch.zeros(D, dtype=torch.bfloat16)
@@ -108,9 +110,9 @@ def hd_encode_spectra(spectra_intensity, spectra_mz, id_hvs, lv_hvs, N, D, Q, ou
         for f in range(start_range, end_range):
             id_index = spectra_mz_t[f]
             intensity = spectra_intensity_t[f]
-            lvl_index = max(0, min(int(intensity * Q), Q-1)) #make sure that lvl index is between [0, Q)
             if intensity != -1:
-                enc_hv += id_hvs[id_index, :] * lvl_hvs[lvl_index, :]
+                lvl_index = max(0, min(int(intensity * Q), Q-1)) #make sure that lvl index is between [0, Q)
+                enc_hv += id_hvs_t[id_index, :] * lvl_hvs_t[lvl_index, :]
 
         #now we have an encoded hv, time to re-binarize it
         enc_hv = torch.where(enc_hv > 0, 1, -1).to(torch.bfloat16)
@@ -119,7 +121,7 @@ def hd_encode_spectra(spectra_intensity, spectra_mz, id_hvs, lv_hvs, N, D, Q, ou
     #now we have our complete hv batch
     return encoded_spectra
 
-def hd_encode_spectra_batched(spectra_intensity, spectra_mz, id_hvs, lv_hvs, N, D, Q, output_type):
+def hd_encode_spectra_batched(spectra_intensity, spectra_mz, id_hvs, lvl_hvs, N, D, Q, output_type):
     encoded_spectra = torch.zeros((N, D), dtype=torch.bfloat16)
 
     max_peaks_used = spectra_intensity.shape[1]
@@ -132,11 +134,11 @@ def hd_encode_spectra_batched(spectra_intensity, spectra_mz, id_hvs, lv_hvs, N, 
 
     #turning id_hvs to matrix to access it's components better in the loop
     bin_len = (id_hvs.shape[0] +  D - 1) // D #should work without the D - 1 added to id_hvs
-    id_hvs = id_hvs.copy().reshape(bin_len, D)
-    id_hvs = torch.from_numpy(id_hvs).to(torch.bfloat16) #convert numpy matrix to torch so we can take advantage of AVX-512
+    id_hvs_t = id_hvs.reshape(bin_len, D)
+    id_hvs_t = torch.from_numpy(id_hvs_t).to(torch.bfloat16) #convert numpy matrix to torch so we can take advantage of AVX-512
     #doing the same for lv_hvs
-    lvl_hvs = lvl_hvs.copy().reshape(Q, D) #Don't need calc, Q is number of vectors in lvl_hvs
-    lvl_hvs = torch.from_numpy(lvl_hvs).to(torch.bfloat16)
+    lvl_hvs_t = lvl_hvs.reshape(Q, D) #Don't need calc, Q is number of vectors in lvl_hvs
+    lvl_hvs_t = torch.from_numpy(lvl_hvs_t).to(torch.bfloat16)
     for sample_idx in range(N):
         #Get blank encoded hyper vector
         enc_hv = torch.zeros(D, dtype=torch.bfloat16)
@@ -145,13 +147,15 @@ def hd_encode_spectra_batched(spectra_intensity, spectra_mz, id_hvs, lv_hvs, N, 
         end_idx = (sample_idx + 1) * max_peaks_used
 
         #getting every row vector index that spectra_mz asks for (Max Peaks Used x D)
-        id_batch = id_hvs[spectra_mz[start_idx: end_idx]]
+        id_batch = id_hvs_t[spectra_mz[start_idx: end_idx]]
         #need to preprocess spectra_intensity because of "if(feature_values[f] != -1)
-        intensity_arr = spectra_intensity[start_idx: end_idx] * Q 
-        intensity_arr = torch.clamp(intensity_arr.to(torch.int8), 0, Q - 1) #get indexs [0, Q-1]
+        intensity_arr = spectra_intensity[start_idx: end_idx]
         array_valid = (intensity_arr != -1).to(torch.bfloat16) #we don't want invalid values to have weight
+        intensity_arr *= Q
+        intensity_arr = torch.clamp(intensity_arr.to(torch.long), 0, Q - 1) #get indexs [0, Q-1]
+
         #array valid will have elements 0 (if not valid) or 1 (if valid)
-        lvl_batch = lvl_hvs[intensity_arr * Q] * array_valid #we take away those rows by zeroing them
+        lvl_batch = lvl_hvs_t[intensity_arr] * array_valid #we take away those rows by zeroing them
 
         #now we can do our thing
         enc_hv = (id_batch * lvl_batch).sum(dim=0) #will sum up all the row vectors
@@ -207,38 +211,30 @@ def fast_pw_dist_cosine_mask_packed(A, D, prec_mz, prec_tol, N, pack_len):
             D[y,x] = tmp
 
 
-def fast_nb_cosine_dist_mask(hvs, prec_mz, prec_tol, output_type, stream=None):
-    N, pack_len = hvs.shape
+def calc_pw_dist(hvs, prec_mz, prec_tol, output_type, stream=None):
+    # pw_dist = fast_nb_cosine_dist_mask(bucket_hv, bucket_prec_mz, config.precursor_tol[0], output_type)
+    N, D = hvs.shape
+    # Perform AMX-accelerated matrix multiply
+    dot_mat = torch.matmul(hvs, hvs.T) #accelerated matrix mult
 
-    # start = time.time()
-    # ss = cp.cuda.Stream(non_blocking=True)
-    # with stream:
-    hvs_d = cp.array(hvs)
-    prec_mz_d = cp.array(prec_mz.ravel())
-    prec_tol_d = nb.float32(prec_tol/1e6)
-    dist_d = cp.zeros((N,N), dtype=cp.float32)
-    # print("Data loading time: ", time.time()-start)
+    # Compute pairwise cosine distance: dist = 1 - (hv_i·hv_j) / (||hv_i|| * ||hv_j||)
+    # Note: Since elements are 1 and -1, every norm will be sqrt((+1)^2 + ... + (-1)^2) = sqrt(D), thus the denom will just be D
+    cosine_sim = dot_mat / D     
+    dist_mat = (1.0 - cosine_sim).to(torch.float32)
+    #now need to filter with prec_mz
+    apply_precursor_filter(dist_mat, prec_mz, prec_tol) #will apply prec filter to dist_mat
+    return dist_mat.to(torch.float32)
 
-    TPB = 32
-    threadsperblock = (TPB, TPB)
-    blockspergrid_x = math.ceil(N / threadsperblock[0])
-    blockspergrid_y = math.ceil(N / threadsperblock[1])
-    blockspergrid = (blockspergrid_x, blockspergrid_y)
+def apply_precursor_filter(dist_mat, prec_mz, prec_tol):
+    #Need to check if every pair of mz val distances (shape (N,))
+    if not isinstance(prec_mz, torch.Tensor):
+        prec_mz = torch.from_numpy(prec_mz.copy())
+    N, _ = prec_mz.shape
+    diff_prec = torch.abs((prec_mz.view(N,1) - prec_mz.view(1,N)) / prec_mz.view(1,N)) #basically see the abs differences between each pair of prec mz vals
+    diff_mask = diff_prec >= prec_tol
+    dist_mat[diff_mask] = 1.0
 
-    # start = time.time()
-    fast_pw_dist_cosine_mask_packed[blockspergrid, threadsperblock]\
-        (hvs_d, dist_d, prec_mz_d, prec_tol_d, N, pack_len)
-    cuda.synchronize()
-    # print("CUDA computing time: ", time.time()-start)
 
-    # start = time.time()
-    if output_type=='cupy':
-        dist = dist_d
-    else:
-        dist = dist_d.get()
-    # print("Data fetching time: ", time.time()-start)
-
-    return dist
 
 
 # Condense pw_dist computation function with improved performance
