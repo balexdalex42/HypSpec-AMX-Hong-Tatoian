@@ -84,27 +84,33 @@ def hd_encode_spectra(spectra_intensity, spectra_mz, id_hvs, lv_hvs, N, D, Q, ou
     encoded_spectra = torch.zeros((N, D), dtype=torch.bfloat16)
 
     max_peaks_used = spectra_intensity.shape[1]
-    spectra_intensity = cp.array(spectra_intensity, dtype=cp.float32).ravel()
-    spectra_mz = cp.array(spectra_mz, dtype=cp.int32).ravel()
+    #fpr debugging purposes
+    print(f"Spectra_mz shape:{spectra_mz.shape}, Type: {spectra_mz.type()}")
+    print(f"spectra_intensity shape:{spectra_intensity.shape}, Type: {spectra_intensity.type()}")
+
+    spectra_intensity_t = torch.from_numpy(np.array(spectra_intensity, dtype=np.float32).ravel())
+    spectra_mz_t = torch.from_numpy(np.array(spectra_mz, dtype=np.int32).ravel())
 
     #turning id_hvs to matrix to access it's components better in the loop
     id_hvs_num_samples = (id_hvs.shape[0] +  D - 1) // D #should work without the D - 1 added to id_hvs
-    id_hvs = id_hvs.copy().shape(id_hvs_num_samples, D)
+    id_hvs = id_hvs.copy().reshape(id_hvs_num_samples, D)
     id_hvs = torch.from_numpy(id_hvs).to(torch.bfloat16) #convert numpy matrix to torch so we can take advantage of AVX-512
     #doing the same for lv_hvs
     lvl_hvs_num_samples = (id_hvs.shape[0] +  D - 1) // D #should work without the D - 1 added to id_hvs
-    lvl_hvs = lvl_hvs.copy().shape(id_hvs_num_samples, D)
+    lvl_hvs = lvl_hvs.copy().reshape(lvl_hvs_num_samples, D)
     lvl_hvs = torch.from_numpy(lvl_hvs).to(torch.bfloat16)
-    for sample_idx in range():
+    for sample_idx in range(N):
         #Get blank encoded hyper vector
         enc_hv = torch.zeros(D, dtype=torch.bfloat16)
         #Getting the range of of sample_idx that we will iterate over
         start_range = sample_idx * max_peaks_used
         end_range = (sample_idx + 1) * max_peaks_used
         for f in range(start_range, end_range):
-            feature_index = int(spectra_mz[f])
-            feature_val = int(spectra_intensity[f])
-            enc_hv += id_hvs[feature_index, :] * lvl_hvs[feature_val, :]
+            id_index = spectra_mz_t[f]
+            intensity = spectra_intensity_t[f]
+            lvl_index = max(0, min(int(intensity * Q), Q-1)) #make sure that lvl index is between [0, Q)
+            if intensity != -1:
+                enc_hv += id_hvs[id_index, :] * lvl_hvs[lvl_index, :]
 
         #now we have an encoded hv, time to re-binarize it
         enc_hv = torch.where(enc_hv > 0, 1, -1).to(torch.bfloat16)
@@ -113,9 +119,50 @@ def hd_encode_spectra(spectra_intensity, spectra_mz, id_hvs, lv_hvs, N, D, Q, ou
     #now we have our complete hv batch
     return encoded_spectra
 
-@cuda.jit('float32(uint32, uint32)', device=True, inline=True)
-def fast_hamming_op(a, b):
-    return nb.float32(cuda.libdevice.popc(a^b))
+def hd_encode_spectra_batched(spectra_intensity, spectra_mz, id_hvs, lv_hvs, N, D, Q, output_type):
+    encoded_spectra = torch.zeros((N, D), dtype=torch.bfloat16)
+
+    max_peaks_used = spectra_intensity.shape[1]
+    #fpr debugging purposes
+    print(f"Spectra_mz shape:{spectra_mz.shape}, Type: {spectra_mz.type()}")
+    print(f"spectra_intensity shape:{spectra_intensity.shape}, Type: {spectra_intensity.type()}")
+
+    spectra_intensity = torch.from_numpy(np.array(spectra_intensity, dtype=np.float32).ravel())
+    spectra_mz = torch.from_numpy(np.array(spectra_mz, dtype=np.int32).ravel())
+
+    #turning id_hvs to matrix to access it's components better in the loop
+    bin_len = (id_hvs.shape[0] +  D - 1) // D #should work without the D - 1 added to id_hvs
+    id_hvs = id_hvs.copy().reshape(bin_len, D)
+    id_hvs = torch.from_numpy(id_hvs).to(torch.bfloat16) #convert numpy matrix to torch so we can take advantage of AVX-512
+    #doing the same for lv_hvs
+    lvl_hvs = lvl_hvs.copy().reshape(Q, D) #Don't need calc, Q is number of vectors in lvl_hvs
+    lvl_hvs = torch.from_numpy(lvl_hvs).to(torch.bfloat16)
+    for sample_idx in range(N):
+        #Get blank encoded hyper vector
+        enc_hv = torch.zeros(D, dtype=torch.bfloat16)
+        #Getting the range of of sample_idx that we will batch over
+        start_idx = sample_idx * max_peaks_used
+        end_idx = (sample_idx + 1) * max_peaks_used
+
+        #getting every row vector index that spectra_mz asks for (Max Peaks Used x D)
+        id_batch = id_hvs[spectra_mz[start_idx: end_idx]]
+        #need to preprocess spectra_intensity because of "if(feature_values[f] != -1)
+        intensity_arr = spectra_intensity[start_idx: end_idx] * Q 
+        intensity_arr = torch.clamp(intensity_arr.to(torch.int8), 0, Q - 1) #get indexs [0, Q-1]
+        array_valid = (intensity_arr != -1).to(torch.bfloat16) #we don't want invalid values to have weight
+        #array valid will have elements 0 (if not valid) or 1 (if valid)
+        lvl_batch = lvl_hvs[intensity_arr * Q] * array_valid #we take away those rows by zeroing them
+
+        #now we can do our thing
+        enc_hv = (id_batch * lvl_batch).sum(dim=0) #will sum up all the row vectors
+
+
+        #now we have an encoded hv, time to re-binarize it
+        enc_hv = torch.where(enc_hv > 0, 1, -1).to(torch.bfloat16)
+        encoded_spectra[sample_idx] = enc_hv
+
+    #now we have our complete hv batch
+    return encoded_spectra
 
 TPB = 32
 TPB1 = 33
@@ -363,12 +410,9 @@ def encode_cluster_spectra_bucket(
         'lv_hvs': lv_hvs, 'id_hvs': id_hvs, 
         'intensity': intensity, 'mz': mz}
 
-    encoded_spectra = []
-    for i in tqdm(range(num_batch)): #this is the same code from hd_cluster.py, but it is more readable now
-        start_idx = i*batch_size 
-        end_idx = min((i+1)*batch_size, len(spectra_df)) #creates the sample_idx tuple which we iterate over
-        encoded_spectra.append(encode_func([start_idx, end_idx], data_dict, config.hd_dim, config.hd_Q, dim, output_type))
-        #encode_func will return an N*D matrix representing each HV batch
+    encoded_spectra = [encode_func(
+        [i*batch_size, min((i+1)*batch_size, len(spectra_df))], 
+        data_dict, config.hd_dim, config.hd_Q, dim, output_type) for i in tqdm(range(num_batch)) ]
                     
     encoded_spectra = np.concatenate(encoded_spectra, dtype=np.uint32)\
         if output_type=='numpy' else encoded_spectra
@@ -392,6 +436,9 @@ def encode_func(
     lv_hvs, id_hvs = np.array(data_dict['lv_hvs'], np.float32), cp.array(data_dict['id_hvs'], np.float32)
 
     batch_size = slice_idx[1] - slice_idx[0]
+    using_batching = True
+    if using_batching:
+        return hd_encode_spectra_batched(intensity, mz, id_hvs, lv_hvs, batch_size, D, Q, output_type) #should be more efficient that latter
     
     return hd_encode_spectra(intensity, mz, id_hvs, lv_hvs, batch_size, D, Q, output_type)
 
@@ -469,13 +516,16 @@ def encode_spectra(
     num_spectra = spectra_mz.shape[0]
     num_batch = num_spectra//batch_size+1
 
-    # Encode spectra on GPU
-    encoded_spectra = [ encode_func(
-        [i*batch_size, min((i+1)*batch_size, num_spectra)], 
-        data_dict, config.hd_dim, config.hd_Q, bin_len, output_type) for i in tqdm(range(num_batch)) ] 
+    # Encode spectra on without GPU
+    encoded_spectra = []
+    for i in tqdm(range(num_batch)): #this is the same code from hd_cluster.py, but it is more readable now
+        start_idx = i*batch_size 
+        end_idx = min((i+1)*batch_size, num_spectra) #creates the sample_idx tuple which we iterate over
+        encoded_spectra.append(encode_func([start_idx, end_idx], data_dict, config.hd_dim, config.hd_Q, bin_len, output_type))
+        #encode_func will return an N*D matrix representing each HV batch
                     
-    encoded_spectra = np.concatenate(encoded_spectra, dtype=np.uint32)\
-        if output_type=='numpy' else encoded_spectra
+    # encoded_spectra = np.concatenate(encoded_spectra, dtype=np.uint32)\
+    #     if output_type=='numpy' else encoded_spectra
 
     logger.info("Encode {} spectra in {:.4f}s".format(len(encoded_spectra), time.time()-start))
 

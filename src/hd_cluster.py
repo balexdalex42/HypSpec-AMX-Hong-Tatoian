@@ -34,8 +34,7 @@ def gen_lvs(D: int, Q: int):
         li = np.copy(l0)
         li[:flip] = l0[:flip] * -1
         levels.append(list(li))
-    # return cp.array(levels, dtype=cp.float32).ravel()
-    return np.array(levels, dtype=np.float32) #converts list to np array instead of cparray
+    return cp.array(levels, dtype=cp.float32).ravel()
 
 
 def gen_idhvs(D: int, totalFeatures: int, flip_factor: float):
