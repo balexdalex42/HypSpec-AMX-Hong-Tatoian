@@ -51,7 +51,6 @@ class Config:
             '--file_type', default='mgf',
             choices=['mgf', 'mzXML', 'mzML'],
             help='Spectra file type (default: %(default)s).')
-
         # self._parser.add_argument(
             # '--work_dir', default=None, type=str,
             # help='Working directory (default: temporary directory).')
@@ -156,6 +155,10 @@ class Config:
             help='The eps parameter (Hamming distance) for DBSCAN clustering '
                  '(default: %(default)s). Relevant Hamming distance thresholds '
                  'are typically around 0.6.')
+        #ADDING AMX
+        self.__parser.add_argument(
+            '--amx', action='store_true', 
+            help='Enable AMX Code (No Packing, Non-GPU Encoding)')
 
         # Filled in 'parse', contains the specified settings.
         self._namespace = None

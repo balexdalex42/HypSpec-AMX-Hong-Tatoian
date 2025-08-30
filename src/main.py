@@ -7,8 +7,7 @@ from config import *
 import tqdm
 import pandas as pd
 
-import hd_preprocess, hd_cluster
-
+import hd_preprocess, hd_cluster, hd_cluster_amx
 logger = logging.getLogger('HyperSpec')
 
 # @profile
@@ -61,7 +60,10 @@ def main(args: Union[str, List[str]] = None) -> int:
     logger.debug('cluster_alg = %s', config.cluster_alg)
     logger.debug('fragment_tol = %.2f', config.fragment_tol)
     logger.debug('eps = %.3f', config.eps)
+    logger.debug('amx = %s', config.amx)
 
+    #Setting which version of hd_cluster to use
+    hd_cluster_lib = hd_cluster_amx if config.amx else hd_cluster
     
     # Restore checkpoints
     spectra_meta_df, spectra_hvs = None, None
@@ -73,9 +75,10 @@ def main(args: Union[str, List[str]] = None) -> int:
         ###################### 1. Load and parse spectra files
         spectra_meta_df, spectra_mz, spectra_intensity = hd_preprocess.load_process_spectra_parallel(config=config, logger=logger)
         logger.info("Preserve {} spectra for cluster charges: {}".format(len(spectra_meta_df), config.cluster_charges))
-        
+        print(f"Spectra_mz shape:{spectra_mz.shape}, Type: {spectra_mz.type()}")
+        print(f"spectra_intensity shape:{spectra_intensity.shape}, Type: {spectra_intensity.type()}")
         ###################### 2 HD Encoding for spectra
-        spectra_hvs = hd_cluster.encode_spectra(
+        spectra_hvs = hd_cluster_lib.encode_spectra(
             spectra_mz=spectra_mz, spectra_intensity=spectra_intensity, config=config, logger=logger)
 
         # Save meta and encoding data
@@ -94,7 +97,7 @@ def main(args: Union[str, List[str]] = None) -> int:
 
         logger.info("Start clustering Charge {} with {} spectra".format(prec_charge_i, len(spec_df_by_charge)))
         
-        cluster_labels_per_charge, cluster_representatives_per_charge = hd_cluster.cluster_spectra(
+        cluster_labels_per_charge, cluster_representatives_per_charge = hd_cluster_lib.cluster_spectra(
             spectra_by_charge_df=spec_df_by_charge, encoded_spectra_hv=spectra_hvs[idx],
             config=config, logger=logger)
 
