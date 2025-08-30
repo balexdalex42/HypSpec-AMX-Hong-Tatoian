@@ -209,7 +209,7 @@ def cuda_bit_packing(orig_vecs, N, D):
 #     else:
 #         raise ValueError("Only 'numpy' output_type supported in NumPy version.")
 
-def encode_spectra_ipex(
+def hd_encode_spectra_packed(
     spectra_intensity: torch.Tensor,  # (N, P), float32
     spectra_mz: torch.Tensor,         # (N, P), long
     id_hvs: torch.Tensor,             # (num_bins, D), int8
