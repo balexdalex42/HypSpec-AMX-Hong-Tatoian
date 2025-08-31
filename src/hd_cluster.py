@@ -9,9 +9,19 @@ from numba import cuda
 from numba.typed import List
 from typing import Callable, Iterator, List, Optional, Tuple
 
-import cupy as cp
-import cuml, rmm
-rmm.reinitialize(pool_allocator=False, managed_memory=True)
+# import cupy as cp
+# import cuml, rmm
+# rmm.reinitialize(pool_allocator=False, managed_memory=True)
+try:
+    import cupy as cp
+    import cuml, rmm
+    rmm.reinitialize(pool_allocator=False, managed_memory=True)
+except ImportError:
+    import numpy as cp  # fallback: use numpy instead of cupy
+    class DummyCumlDBSCAN:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("GPU clustering requested but CuPy/cuML not available")
+    cuml = type("cuml", (), {"DBSCAN": DummyCumlDBSCAN})
 
 import pandas as pd
 import scipy.sparse as ss
