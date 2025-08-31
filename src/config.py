@@ -156,7 +156,7 @@ class Config:
                  '(default: %(default)s). Relevant Hamming distance thresholds '
                  'are typically around 0.6.')
         #ADDING AMX
-        self.__parser.add_argument(
+        self._parser.add_argument(
             '--amx', action='store_true', 
             help='Enable AMX Code (No Packing, Non-GPU Encoding)')
 
