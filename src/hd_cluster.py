@@ -5,8 +5,14 @@ import numpy as np
 np.random.seed(0)
 
 import numba as nb
-from numba import cuda
 from numba.typed import List
+
+try:
+    from numba import cuda
+    gpu_available = True
+except Exception:
+    gpu_available = False
+
 from typing import Callable, Iterator, List, Optional, Tuple
 
 # import cupy as cp
@@ -80,252 +86,363 @@ def gen_lv_id_hvs(
         lv_hvs, id_hvs = data['lv_hvs'], data['id_hvs']
     else:
         lv_hvs = gen_lvs(D, Q)
-        lv_hvs = cuda_bit_packing(lv_hvs, Q+1, D)
+        lv_hvs = nb_bit_packing(lv_hvs, Q+1, D)
         id_hvs = gen_idhvs(D, bin_len, id_flip_factor)
-        id_hvs = cuda_bit_packing(id_hvs, bin_len, D)
+        id_hvs = nb_bit_packing(id_hvs, bin_len, D)
         cp.savez(lv_id_hvs_file, lv_hvs=lv_hvs, id_hvs=id_hvs)
     return lv_hvs, id_hvs
 
 
-def cuda_bit_packing(orig_vecs, N, D):
-    pack_len = (D+32-1)//32
-    packed_vecs = cp.zeros(N * pack_len, dtype=cp.uint32)
-    packing_cuda_kernel = cp.RawKernel(r'''
-                    extern "C" __global__
-                    void packing(unsigned int* output, float* arr, int origLength, int packLength, int numVec) {
-                        int i = blockDim.x * blockIdx.x + threadIdx.x;
-                        if (i >= origLength)
-                            return;
-                        for (int sample_idx = blockIdx.y; sample_idx < numVec; sample_idx += blockDim.y * gridDim.y) 
-                        {
-                            int tid = threadIdx.x;
-                            int lane = tid % warpSize;
-                            int bitPattern=0;
-                            if (i < origLength)
-                                bitPattern = __brev(__ballot_sync(0xFFFFFFFF, arr[sample_idx*origLength+i] > 0));
-                            if (lane == 0) {
-                                output[sample_idx*packLength+ (i / warpSize)] = bitPattern;
-                            }
-                        }
-                    }
-                    ''', 'packing')
-    threads = 1024
-    packing_cuda_kernel(((D + threads - 1) // threads, N), (threads,), (packed_vecs, orig_vecs, D, pack_len, N))
+# def cuda_bit_packing(orig_vecs, N, D):
+#     pack_len = (D+32-1)//32
+#     packed_vecs = cp.zeros(N * pack_len, dtype=cp.uint32)
+#     packing_cuda_kernel = cp.RawKernel(r'''
+#                     extern "C" __global__
+#                     void packing(unsigned int* output, float* arr, int origLength, int packLength, int numVec) {
+#                         int i = blockDim.x * blockIdx.x + threadIdx.x;
+#                         if (i >= origLength)
+#                             return;
+#                         for (int sample_idx = blockIdx.y; sample_idx < numVec; sample_idx += blockDim.y * gridDim.y) 
+#                         {
+#                             int tid = threadIdx.x;
+#                             int lane = tid % warpSize;
+#                             int bitPattern=0;
+#                             if (i < origLength)
+#                                 bitPattern = __brev(__ballot_sync(0xFFFFFFFF, arr[sample_idx*origLength+i] > 0));
+#                             if (lane == 0) {
+#                                 output[sample_idx*packLength+ (i / warpSize)] = bitPattern;
+#                             }
+#                         }
+#                     }
+#                     ''', 'packing')
+#     threads = 1024
+#     packing_cuda_kernel(((D + threads - 1) // threads, N), (threads,), (packed_vecs, orig_vecs, D, pack_len, N))
 
-    return packed_vecs.reshape(N, pack_len)
+#     return packed_vecs.reshape(N, pack_len)
 
 
-def hd_encode_spectra_packed(spectra_intensity, spectra_mz, id_hvs_packed, lv_hvs_packed, N, D, Q, output_type):
-    packed_dim = (D + 32 - 1) // 32
-    encoded_spectra = cp.zeros(N * packed_dim, dtype=cp.uint32)
+# def hd_encode_spectra_packed(spectra_intensity, spectra_mz, id_hvs_packed, lv_hvs_packed, N, D, Q, output_type):
+#     packed_dim = (D + 32 - 1) // 32
+#     encoded_spectra = cp.zeros(N * packed_dim, dtype=cp.uint32)
     
-    max_peaks_used = spectra_intensity.shape[1]
-    spectra_intensity = cp.array(spectra_intensity, dtype=cp.float32).ravel()
-    spectra_mz = cp.array(spectra_mz, dtype=cp.int32).ravel()
+#     max_peaks_used = spectra_intensity.shape[1]
+#     spectra_intensity = cp.array(spectra_intensity, dtype=cp.float32).ravel()
+#     spectra_mz = cp.array(spectra_mz, dtype=cp.int32).ravel()
     
-    hd_enc_lvid_packed_cuda_kernel = cp.RawKernel(r'''
-                __device__ float* get2df(float* p, const int x, int y, const int stride) {
-                    return (float*)((char*)p + x*stride) + y;
-                }
-                __device__ char get2d_bin(unsigned int* p, const int i, const int DIM, const int d) {
-                    unsigned int v = ((*(p + i * ((DIM + 32-1)/32) + d/32)) >> ((32-1) - d % 32)) & 0x01;
-                    if (v == 0) {
-                        return -1;
-                    } else {
-                        return 1;
-                    }
-                }
-                extern "C" __global__
-                void hd_enc_lvid_packed_cuda(
-                    unsigned int* __restrict__ id_hvs_packed, unsigned int* __restrict__ level_hvs_packed, 
-                    int* __restrict__ feature_indices, float* __restrict__ feature_values, 
-                    int max_peaks_used, unsigned int* hv_matrix, 
-                    int N, int Q, int D, int packLength) {
-                    const int d = threadIdx.x + blockIdx.x * blockDim.x;
-                    if (d >= D)
-                        return;
-                    for (int sample_idx = blockIdx.y; sample_idx < N; sample_idx += blockDim.y * gridDim.y) 
-                    {
-                        // we traverse [start, end-1]
-                        float encoded_hv_e = 0.0;
-                        unsigned int start_range = sample_idx*max_peaks_used;
-                        unsigned int end_range = (sample_idx + 1)*max_peaks_used;
-                        #pragma unroll 1
-                        for (int f = start_range; f < end_range; ++f) {
-                            if(feature_values[f] != -1)
-                                encoded_hv_e += get2d_bin(level_hvs_packed, (int)(feature_values[f] * Q), D, d) * \
-                                                get2d_bin(id_hvs_packed, feature_indices[f], D, d);
-                        }
+#     hd_enc_lvid_packed_cuda_kernel = cp.RawKernel(r'''
+#                 __device__ float* get2df(float* p, const int x, int y, const int stride) {
+#                     return (float*)((char*)p + x*stride) + y;
+#                 }
+#                 __device__ char get2d_bin(unsigned int* p, const int i, const int DIM, const int d) {
+#                     unsigned int v = ((*(p + i * ((DIM + 32-1)/32) + d/32)) >> ((32-1) - d % 32)) & 0x01;
+#                     if (v == 0) {
+#                         return -1;
+#                     } else {
+#                         return 1;
+#                     }
+#                 }
+#                 extern "C" __global__
+#                 void hd_enc_lvid_packed_cuda(
+#                     unsigned int* __restrict__ id_hvs_packed, unsigned int* __restrict__ level_hvs_packed, 
+#                     int* __restrict__ feature_indices, float* __restrict__ feature_values, 
+#                     int max_peaks_used, unsigned int* hv_matrix, 
+#                     int N, int Q, int D, int packLength) {
+#                     const int d = threadIdx.x + blockIdx.x * blockDim.x;
+#                     if (d >= D)
+#                         return;
+#                     for (int sample_idx = blockIdx.y; sample_idx < N; sample_idx += blockDim.y * gridDim.y) 
+#                     {
+#                         // we traverse [start, end-1]
+#                         float encoded_hv_e = 0.0;
+#                         unsigned int start_range = sample_idx*max_peaks_used;
+#                         unsigned int end_range = (sample_idx + 1)*max_peaks_used;
+#                         #pragma unroll 1
+#                         for (int f = start_range; f < end_range; ++f) {
+#                             if(feature_values[f] != -1)
+#                                 encoded_hv_e += get2d_bin(level_hvs_packed, (int)(feature_values[f] * Q), D, d) * \
+#                                                 get2d_bin(id_hvs_packed, feature_indices[f], D, d);
+#                         }
                         
-                        // hv_matrix[sample_idx*D+d] = (encoded_hv_e > 0)? 1 : -1;
-                        int tid = threadIdx.x;
-                        int lane = tid % warpSize;
-                        int bitPattern=0;
-                        if (d < D)
-                            bitPattern = __ballot_sync(0xFFFFFFFF, encoded_hv_e > 0);
-                        if (lane == 0) {
-                            hv_matrix[sample_idx * packLength + (d / warpSize)] = bitPattern;
-                        }
-                    }
-                }
-                ''', 'hd_enc_lvid_packed_cuda')
+#                         // hv_matrix[sample_idx*D+d] = (encoded_hv_e > 0)? 1 : -1;
+#                         int tid = threadIdx.x;
+#                         int lane = tid % warpSize;
+#                         int bitPattern=0;
+#                         if (d < D)
+#                             bitPattern = __ballot_sync(0xFFFFFFFF, encoded_hv_e > 0);
+#                         if (lane == 0) {
+#                             hv_matrix[sample_idx * packLength + (d / warpSize)] = bitPattern;
+#                         }
+#                     }
+#                 }
+#                 ''', 'hd_enc_lvid_packed_cuda')
                 
-    threads = 1024
-    max_block = cp.cuda.runtime.getDeviceProperties(0)['maxGridSize'][1]
-    hd_enc_lvid_packed_cuda_kernel(
-        ((D + threads - 1) // threads, min(N, max_block)), (threads,), 
-        (id_hvs_packed, lv_hvs_packed, spectra_mz, spectra_intensity, max_peaks_used, encoded_spectra, N, Q, D, packed_dim))
+#     threads = 1024
+#     max_block = cp.cuda.runtime.getDeviceProperties(0)['maxGridSize'][1]
+#     hd_enc_lvid_packed_cuda_kernel(
+#         ((D + threads - 1) // threads, min(N, max_block)), (threads,), 
+#         (id_hvs_packed, lv_hvs_packed, spectra_mz, spectra_intensity, max_peaks_used, encoded_spectra, N, Q, D, packed_dim))
 
-    if output_type=='numpy':
-        return encoded_spectra.reshape(N, packed_dim).get()
-    elif output_type=='cupy':
-        return encoded_spectra.reshape(N, packed_dim)
+#     if output_type=='numpy':
+#         return encoded_spectra.reshape(N, packed_dim).get()
+#     elif output_type=='cupy':
+#         return encoded_spectra.reshape(N, packed_dim)
+@nb.njit(parallel=True)
+def nb_bit_packing(orig_vecs, N, D):
+    pack_len = (D + 31) // 32
+    packed_vecs = np.zeros((N, pack_len), dtype=np.uint32)
+    
+    for n in nb.prange(N):  # parallel over samples
+        for d in range(D):
+            if orig_vecs[n, d] > 0:
+                word_idx = d // 32
+                bit_idx = 31 - (d % 32)
+                packed_vecs[n, word_idx] |= (1 << bit_idx)
+                
+    return packed_vecs
 
+@nb.njit(parallel=True)
+def hd_encode_spectra_packed(spectra_intensity, spectra_mz, id_hvs_packed, lv_hvs_packed, N, D, Q, max_peaks_used):
+    packed_dim = (D + 31) // 32
+    encoded_spectra = np.zeros((N, packed_dim), dtype=np.uint32)
+    
+    for sample_idx in nb.prange(N):  # parallel over samples
+        for d in range(D):
+            encoded_value = 0
+            for f in range(max_peaks_used):
+                feature_idx = spectra_mz[sample_idx, f]
+                feature_val = spectra_intensity[sample_idx, f]
+                
+                if feature_val == -1:
+                    continue
+                
+                # get sign of ID HV
+                id_word_idx = d // 32
+                id_bit_idx = 31 - (d % 32)
+                id_sign = 1 if (id_hvs_packed[feature_idx, id_word_idx] >> id_bit_idx) & 1 else -1
+                
+                # get sign of level HV
+                lv_word_idx = d // 32
+                lv_bit_idx = 31 - (d % 32)
+                lv_sign = 1 if (lv_hvs_packed[int(feature_val * Q), lv_word_idx] >> lv_bit_idx) & 1 else -1
+                
+                encoded_value += id_sign * lv_sign
+            
+            # pack the bit
+            if encoded_value > 0:
+                word_idx = d // 32
+                bit_idx = 31 - (d % 32)
+                encoded_spectra[sample_idx, word_idx] |= (1 << bit_idx)
+                
+    return encoded_spectra
 
-@cuda.jit('float32(uint32, uint32)', device=True, inline=True)
+# @cuda.jit('float32(uint32, uint32)', device=True, inline=True)
+# def fast_hamming_op(a, b):
+#     return nb.float32(cuda.libdevice.popc(a^b))
+
+# TPB = 32
+# TPB1 = 33
+
+# @cuda.jit('void(uint32[:,:], float32[:,:], float32[:], float32, int32, int32)')
+# def fast_pw_dist_cosine_mask_packed(A, D, prec_mz, prec_tol, N, pack_len):
+#     """
+#         Pair-wise cosine distance
+#     """
+#     sA = cuda.shared.array((TPB, TPB1), dtype=nb.uint32)
+#     sB = cuda.shared.array((TPB, TPB1), dtype=nb.uint32)
+
+#     x, y = cuda.grid(2)
+#     tx, ty = cuda.threadIdx.x, cuda.threadIdx.y
+#     bx = cuda.blockIdx.x
+
+#     tmp = nb.float32(.0)
+#     for i in range((pack_len+TPB-1) // TPB):
+#         if y < N and (i*TPB+tx) < pack_len:
+#             sA[ty, tx] = A[y, i*TPB+tx]
+#         else:
+#             sA[ty, tx] = .0
+
+#         if (TPB*bx+ty) < N and (i*TPB+tx) < pack_len:
+#             sB[ty, tx] = A[TPB*bx+ty, i*TPB+tx]
+#         else:
+#             sB[ty, tx] = .0  
+#         cuda.syncthreads()
+
+#         for j in range(TPB):
+#             tmp += fast_hamming_op(sA[ty, j], sB[tx, j])
+
+#         cuda.syncthreads()
+
+#     if x<N and y<N and y>x:
+#         if cuda.libdevice.fabsf((prec_mz[x]-prec_mz[y])/prec_mz[y])>=prec_tol:
+#             D[x,y] = 1.0
+#             D[y,x] = 1.0
+#         else:
+#             tmp/=(32*pack_len)
+#             D[x,y] = tmp
+#             D[y,x] = tmp
+
+@nb.njit
 def fast_hamming_op(a, b):
-    return nb.float32(cuda.libdevice.popc(a^b))
+    # popcount for CPU
+    c = 0
+    x = a ^ b
+    while x:
+        c += x & 1
+        x >>= 1
+    return c
 
-TPB = 32
-TPB1 = 33
-
-@cuda.jit('void(uint32[:,:], float32[:,:], float32[:], float32, int32, int32)')
-def fast_pw_dist_cosine_mask_packed(A, D, prec_mz, prec_tol, N, pack_len):
-    """
-        Pair-wise cosine distance
-    """
-    sA = cuda.shared.array((TPB, TPB1), dtype=nb.uint32)
-    sB = cuda.shared.array((TPB, TPB1), dtype=nb.uint32)
-
-    x, y = cuda.grid(2)
-    tx, ty = cuda.threadIdx.x, cuda.threadIdx.y
-    bx = cuda.blockIdx.x
-
-    tmp = nb.float32(.0)
-    for i in range((pack_len+TPB-1) // TPB):
-        if y < N and (i*TPB+tx) < pack_len:
-            sA[ty, tx] = A[y, i*TPB+tx]
-        else:
-            sA[ty, tx] = .0
-
-        if (TPB*bx+ty) < N and (i*TPB+tx) < pack_len:
-            sB[ty, tx] = A[TPB*bx+ty, i*TPB+tx]
-        else:
-            sB[ty, tx] = .0  
-        cuda.syncthreads()
-
-        for j in range(TPB):
-            tmp += fast_hamming_op(sA[ty, j], sB[tx, j])
-
-        cuda.syncthreads()
-
-    if x<N and y<N and y>x:
-        if cuda.libdevice.fabsf((prec_mz[x]-prec_mz[y])/prec_mz[y])>=prec_tol:
-            D[x,y] = 1.0
-            D[y,x] = 1.0
-        else:
-            tmp/=(32*pack_len)
-            D[x,y] = tmp
-            D[y,x] = tmp
+@nb.njit(parallel=True)
+def fast_pw_dist_cosine_mask_packed(A, prec_mz, prec_tol, N, pack_len):
+    D = np.zeros((N, N), dtype=np.float32)
+    for x in nb.prange(N):
+        for y in range(x+1, N):
+            if abs((prec_mz[x]-prec_mz[y])/prec_mz[y]) >= prec_tol:
+                D[x,y] = 1.0
+                D[y,x] = 1.0
+            else:
+                tmp = 0.0
+                for i in range(pack_len):
+                    tmp += fast_hamming_op(A[x,i], A[y,i])
+                tmp /= (32 * pack_len)
+                D[x,y] = tmp
+                D[y,x] = tmp
+    return D            
 
 
-def fast_nb_cosine_dist_mask(hvs, prec_mz, prec_tol, output_type, stream=None):
-    N, pack_len = hvs.shape
+# def fast_nb_cosine_dist_mask(hvs, prec_mz, prec_tol, output_type, stream=None):
+#     N, pack_len = hvs.shape
 
-    # start = time.time()
-    # ss = cp.cuda.Stream(non_blocking=True)
-    # with stream:
-    hvs_d = cp.array(hvs)
-    prec_mz_d = cp.array(prec_mz.ravel())
-    prec_tol_d = nb.float32(prec_tol/1e6)
-    dist_d = cp.zeros((N,N), dtype=cp.float32)
-    # print("Data loading time: ", time.time()-start)
+#     # start = time.time()
+#     # ss = cp.cuda.Stream(non_blocking=True)
+#     # with stream:
+#     hvs_d = cp.array(hvs)
+#     prec_mz_d = cp.array(prec_mz.ravel())
+#     prec_tol_d = nb.float32(prec_tol/1e6)
+#     dist_d = cp.zeros((N,N), dtype=cp.float32)
+#     # print("Data loading time: ", time.time()-start)
 
-    TPB = 32
-    threadsperblock = (TPB, TPB)
-    blockspergrid_x = math.ceil(N / threadsperblock[0])
-    blockspergrid_y = math.ceil(N / threadsperblock[1])
-    blockspergrid = (blockspergrid_x, blockspergrid_y)
+#     TPB = 32
+#     threadsperblock = (TPB, TPB)
+#     blockspergrid_x = math.ceil(N / threadsperblock[0])
+#     blockspergrid_y = math.ceil(N / threadsperblock[1])
+#     blockspergrid = (blockspergrid_x, blockspergrid_y)
 
-    # start = time.time()
-    fast_pw_dist_cosine_mask_packed[blockspergrid, threadsperblock]\
-        (hvs_d, dist_d, prec_mz_d, prec_tol_d, N, pack_len)
-    cuda.synchronize()
-    # print("CUDA computing time: ", time.time()-start)
+#     # start = time.time()
+#     fast_pw_dist_cosine_mask_packed[blockspergrid, threadsperblock]\
+#         (hvs_d, dist_d, prec_mz_d, prec_tol_d, N, pack_len)
+#     cuda.synchronize()
+#     # print("CUDA computing time: ", time.time()-start)
 
-    # start = time.time()
-    if output_type=='cupy':
-        dist = dist_d
-    else:
-        dist = dist_d.get()
-    # print("Data fetching time: ", time.time()-start)
+#     # start = time.time()
+#     if output_type=='cupy':
+#         dist = dist_d
+#     else:
+#         dist = dist_d.get()
+#     # print("Data fetching time: ", time.time()-start)
 
-    return dist
+#     return dist
 
 
-# Condense pw_dist computation function with improved performance
-@cuda.jit('void(uint32[:,:], float32[:], float32[:], float32, int32, int32)')
-def fast_pw_dist_cosine_mask_packed_condense(A, D, prec_mz, prec_tol, N, pack_len):
-    """
-        Pair-wise cosine distance
-    """
-    sA = cuda.shared.array((TPB, TPB1), dtype=nb.uint32)
-    sB = cuda.shared.array((TPB, TPB1), dtype=nb.uint32)
+# # Condense pw_dist computation function with improved performance
+# @cuda.jit('void(uint32[:,:], float32[:], float32[:], float32, int32, int32)')
+# def fast_pw_dist_cosine_mask_packed_condense(A, D, prec_mz, prec_tol, N, pack_len):
+#     """
+#         Pair-wise cosine distance
+#     """
+#     sA = cuda.shared.array((TPB, TPB1), dtype=nb.uint32)
+#     sB = cuda.shared.array((TPB, TPB1), dtype=nb.uint32)
 
-    x, y = cuda.grid(2)
-    tx, ty = cuda.threadIdx.x, cuda.threadIdx.y
-    bx = cuda.blockIdx.x
+#     x, y = cuda.grid(2)
+#     tx, ty = cuda.threadIdx.x, cuda.threadIdx.y
+#     bx = cuda.blockIdx.x
 
-    tmp = nb.float32(.0)
-    for i in range((pack_len+TPB-1) // TPB):
-        if y < N and (i*TPB+tx) < pack_len:
-            sA[ty, tx] = A[y, i*TPB+tx]
-        else:
-            sA[ty, tx] = .0
+#     tmp = nb.float32(.0)
+#     for i in range((pack_len+TPB-1) // TPB):
+#         if y < N and (i*TPB+tx) < pack_len:
+#             sA[ty, tx] = A[y, i*TPB+tx]
+#         else:
+#             sA[ty, tx] = .0
 
-        if (TPB*bx+ty) < N and (i*TPB+tx) < pack_len:
-            sB[ty, tx] = A[TPB*bx+ty, i*TPB+tx]
-        else:
-            sB[ty, tx] = .0  
-        cuda.syncthreads()
+#         if (TPB*bx+ty) < N and (i*TPB+tx) < pack_len:
+#             sB[ty, tx] = A[TPB*bx+ty, i*TPB+tx]
+#         else:
+#             sB[ty, tx] = .0  
+#         cuda.syncthreads()
 
-        for j in range(TPB):
-            tmp += fast_hamming_op(sA[ty, j], sB[tx, j])
+#         for j in range(TPB):
+#             tmp += fast_hamming_op(sA[ty, j], sB[tx, j])
 
-        cuda.syncthreads()
+#         cuda.syncthreads()
 
-    if x<N and y<N and y>x:
-        if cuda.libdevice.fabsf((prec_mz[x]-prec_mz[y])/prec_mz[y])>=prec_tol:
-            D[int(N*x-(x*x+x)/2+y-x-1)] = 1.0
-        else:
-            tmp/=(32*pack_len)
-            D[int(N*x-(x*x+x)/2+y-x-1)] = tmp
+#     if x<N and y<N and y>x:
+#         if cuda.libdevice.fabsf((prec_mz[x]-prec_mz[y])/prec_mz[y])>=prec_tol:
+#             D[int(N*x-(x*x+x)/2+y-x-1)] = 1.0
+#         else:
+#             tmp/=(32*pack_len)
+#             D[int(N*x-(x*x+x)/2+y-x-1)] = tmp
            
 
-def fast_nb_cosine_dist_condense(hvs, prec_mz, prec_tol, output_type, stream=None):
-    N, pack_len = hvs.shape
+# def fast_nb_cosine_dist_condense(hvs, prec_mz, prec_tol, output_type, stream=None):
+#     N, pack_len = hvs.shape
     
-    hvs_d = cp.array(hvs)
-    prec_mz_d = cp.array(prec_mz.ravel())
-    prec_tol_d = nb.float32(prec_tol/1e6)
-    dist_d = cp.zeros(int(N*(N-1)/2), dtype=cp.float32)
+#     hvs_d = cp.array(hvs)
+#     prec_mz_d = cp.array(prec_mz.ravel())
+#     prec_tol_d = nb.float32(prec_tol/1e6)
+#     dist_d = cp.zeros(int(N*(N-1)/2), dtype=cp.float32)
 
-    TPB = 32
-    threadsperblock = (TPB, TPB)
-    blockspergrid_x = math.ceil(N / threadsperblock[0])
-    blockspergrid_y = math.ceil(N / threadsperblock[1])
-    blockspergrid = (blockspergrid_x, blockspergrid_y)
+#     TPB = 32
+#     threadsperblock = (TPB, TPB)
+#     blockspergrid_x = math.ceil(N / threadsperblock[0])
+#     blockspergrid_y = math.ceil(N / threadsperblock[1])
+#     blockspergrid = (blockspergrid_x, blockspergrid_y)
 
-    fast_pw_dist_cosine_mask_packed_condense[blockspergrid, threadsperblock]\
-        (hvs_d, dist_d, prec_mz_d, prec_tol_d, N, pack_len)
-    cuda.synchronize()
+#     fast_pw_dist_cosine_mask_packed_condense[blockspergrid, threadsperblock]\
+#         (hvs_d, dist_d, prec_mz_d, prec_tol_d, N, pack_len)
+#     cuda.synchronize()
 
-    if output_type=='cupy':
-        dist = dist_d
-    else:
-        dist = dist_d.get()
+#     if output_type=='cupy':
+#         dist = dist_d
+#     else:
+#         dist = dist_d.get()
 
+#     return dist
+@nb.njit(parallel=True)
+def fast_pw_dist_cosine_mask_packed_condense(A, prec_mz, prec_tol, N, pack_len):
+    """
+    CPU version of condensed pairwise cosine distance.
+    Returns a 1D array of length N*(N-1)/2 storing upper triangular values.
+    """
+    dist = np.zeros(N*(N-1)//2, dtype=np.float32)
+    
+    for x in nb.prange(N):
+        for y in range(x+1, N):
+            idx = int(N*x - (x*x + x)//2 + y - x - 1)
+            
+            if abs((prec_mz[x] - prec_mz[y]) / prec_mz[y]) >= prec_tol:
+                dist[idx] = 1.0
+            else:
+                tmp = 0.0
+                for i in range(pack_len):
+                    tmp += fast_hamming_op(A[x, i], A[y, i])
+                tmp /= (32 * pack_len)
+                dist[idx] = tmp
     return dist
+
+def fast_nb_cosine_dist_condense(hvs, prec_mz, prec_tol, output_type='numpy'):
+    """
+    Wrapper function for CPU pairwise distance computation.
+    """
+    N, pack_len = hvs.shape
+    prec_tol_val = prec_tol / 1e6  # match original scaling
+
+    dist = fast_pw_dist_cosine_mask_packed_condense(hvs.astype(np.uint32),
+                                                        prec_mz.astype(np.float32),
+                                                        prec_tol_val,
+                                                        N, pack_len)
+    
+    if output_type == 'cupy':
+        # import cupy as cp
+        return cp.array(dist)
 
 
 def get_dim(min_mz: float, max_mz: float, bin_size: float) \
@@ -357,7 +474,7 @@ def get_dim(min_mz: float, max_mz: float, bin_size: float) \
     return math.ceil((end_dim - start_dim) / bin_size), start_dim, end_dim
 
 
-# @nb.jit(cache=True)
+@nb.njit(cache=True)
 def _to_csr_vector(
     spectra: pd.DataFrame, 
     min_mz: float, 
@@ -606,7 +723,7 @@ def cluster_bucket(
         bucket_prec_mz = data_dict['prec_mz'][bucket_slice[0]: bucket_slice[1]]
         bucket_rt_time = data_dict['rt_time'][bucket_slice[0]: bucket_slice[1]]
         
-        pw_dist = fast_nb_cosine_dist_mask(bucket_hv, bucket_prec_mz, config.precursor_tol[0], output_type)
+        pw_dist = fast_pw_dist_cosine_mask_packed(bucket_hv, bucket_prec_mz, config.precursor_tol[0], output_type)
         cluster_func.fit(pw_dist) #
         
         cluster_labels_refined = refine_cluster(
@@ -1098,7 +1215,7 @@ def _assign_unique_cluster_labels(
         # print(cluster_labels[start_i:stop_i])
 
 
-# @nb.njit(cache=True, parallel=True)
+@nb.njit(cache=True, parallel=True)
 def get_cluster_representative(
     cluster_labels: np.ndarray,
     pw_dist: np.ndarray

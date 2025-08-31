@@ -4,9 +4,15 @@ from tqdm import tqdm
 import numpy as np
 np.random.seed(0)
 
-# import numba as nb
-# from numba import cuda
-# from numba.typed import List
+import numba as nb
+from numba.typed import List
+
+try:
+    from numba import cuda
+    gpu_available = True
+except Exception:
+    gpu_available = False
+
 from typing import Callable, Iterator, List, Optional, Tuple
 
 # import cupy as cp
@@ -180,7 +186,7 @@ def hd_encode_spectra_batched(spectra_intensity, spectra_mz, id_hvs, lvl_hvs, N,
 TPB = 32
 TPB1 = 33
 
-@cuda.jit('void(uint32[:,:], float32[:,:], float32[:], float32, int32, int32)')
+# @cuda.jit('void(uint32[:,:], float32[:,:], float32[:], float32, int32, int32)')
 def fast_pw_dist_cosine_mask_packed(A, D, prec_mz, prec_tol, N, pack_len):
     """
         Pair-wise cosine distance
@@ -247,7 +253,7 @@ def apply_precursor_filter(dist_mat, prec_mz, prec_tol):
 
 
 # Condense pw_dist computation function with improved performance
-@cuda.jit('void(uint32[:,:], float32[:], float32[:], float32, int32, int32)')
+# @cuda.jit('void(uint32[:,:], float32[:], float32[:], float32, int32, int32)')
 def fast_pw_dist_cosine_mask_packed_condense(A, D, prec_mz, prec_tol, N, pack_len):
     """
         Pair-wise cosine distance
