@@ -102,8 +102,8 @@ def hd_encode_spectra(spectra_intensity, spectra_mz, id_hvs, lvl_hvs, N, D, Q, o
 
     max_peaks_used = spectra_intensity.shape[1]
     #fpr debugging purposes
-    print(f"Spectra_mz shape:{spectra_mz.shape}, Type: {spectra_mz.type()}")
-    print(f"spectra_intensity shape:{spectra_intensity.shape}, Type: {spectra_intensity.type()}")
+    print(f"Spectra_mz shape:{spectra_mz.shape}, Type: {type(spectra_mz)}")
+    print(f"spectra_intensity shape:{spectra_intensity.shape}, Type: {type(spectra_intensity)}")
 
     spectra_intensity_t = torch.from_numpy(np.array(spectra_intensity, dtype=np.float32).ravel())
     spectra_mz_t = torch.from_numpy(np.array(spectra_mz, dtype=np.int32).ravel())
@@ -141,8 +141,8 @@ def hd_encode_spectra_batched(spectra_intensity, spectra_mz, id_hvs, lvl_hvs, N,
 
     max_peaks_used = spectra_intensity.shape[1]
     #fpr debugging purposes
-    print(f"Spectra_mz shape:{spectra_mz.shape}, Type: {spectra_mz.type()}")
-    print(f"spectra_intensity shape:{spectra_intensity.shape}, Type: {spectra_intensity.type()}")
+    print(f"Spectra_mz shape:{spectra_mz.shape}, Type: {type(spectra_mz)}")
+    print(f"spectra_intensity shape:{spectra_intensity.shape}, Type: {type(spectra_intensity)}")
 
     spectra_intensity = torch.from_numpy(np.array(spectra_intensity, dtype=np.float32).ravel())
     spectra_mz = torch.from_numpy(np.array(spectra_mz, dtype=np.int32).ravel())
