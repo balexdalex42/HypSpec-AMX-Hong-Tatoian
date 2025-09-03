@@ -152,7 +152,7 @@ def hd_encode_spectra_batched(spectra_intensity, spectra_mz, id_hvs, lvl_hvs, N,
     id_hvs_t = id_hvs.reshape(bin_len, D)
     id_hvs_t = torch.from_numpy(id_hvs_t).to(torch.bfloat16) #convert numpy matrix to torch so we can take advantage of AVX-512
     #doing the same for lv_hvs
-    lvl_hvs_num_samples = (id_hvs.shape[0] +  D - 1) // D
+    lvl_hvs_num_samples = (lvl_hvs.shape[0] +  D - 1) // D
     lvl_hvs_t = lvl_hvs.reshape(lvl_hvs_num_samples, D) #Don't need calc, Q is number of vectors in lvl_hvs
     lvl_hvs_t = torch.from_numpy(lvl_hvs_t).to(torch.bfloat16)
     for sample_idx in range(N):
