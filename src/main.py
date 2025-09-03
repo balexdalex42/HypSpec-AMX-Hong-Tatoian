@@ -10,6 +10,12 @@ import pandas as pd
 import hd_preprocess, hd_cluster, hd_cluster_amx
 logger = logging.getLogger('HyperSpec')
 
+import torch
+import numpy as np
+
+import cProfile
+import pstats
+
 # @profile
 def main(args: Union[str, List[str]] = None) -> int:
     # Configure logging.
@@ -82,8 +88,9 @@ def main(args: Union[str, List[str]] = None) -> int:
 
         # Save meta and encoding data
         if config.checkpoint:
+            spectra_hvs_numpy = np.array([tensor.numpy() for tensor in spectra_hvs], dtype=np.float32)
             hd_preprocess.save_checkpoint(
-                spectra_meta=spectra_meta_df, spectra_hvs=spectra_hvs, 
+                spectra_meta=spectra_meta_df, spectra_hvs=spectra_hvs_numpy, 
                 config=config, logger=logger)
 
 
@@ -93,10 +100,12 @@ def main(args: Union[str, List[str]] = None) -> int:
         # Select spectra with cluster charge
         idx = spectra_meta_df['precursor_charge']==prec_charge_i #we get a series
         spec_df_by_charge = spectra_meta_df.loc[idx]
+        print(f"spec_df_by_charge: {spec_df_by_charge}")
 
         logger.info("Start clustering Charge {} with {} spectra".format(prec_charge_i, len(spec_df_by_charge)))
         # we need to make sure we get row hypervectors we need, good thing we have the indexes spec_df_by_charge
         idx_indices = spec_df_by_charge.index.tolist()
+        print(f"idx_indices: {idx_indices}")
         selected_hvs = [spectra_hvs[i] for i in idx_indices]
         cluster_labels_per_charge, cluster_representatives_per_charge = hd_cluster_lib.cluster_spectra(
             spectra_by_charge_df=spec_df_by_charge, encoded_spectra_hv=selected_hvs,
