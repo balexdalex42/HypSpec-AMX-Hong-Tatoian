@@ -75,8 +75,8 @@ def main(args: Union[str, List[str]] = None) -> int:
         ###################### 1. Load and parse spectra files
         spectra_meta_df, spectra_mz, spectra_intensity = hd_preprocess.load_process_spectra_parallel(config=config, logger=logger)
         logger.info("Preserve {} spectra for cluster charges: {}".format(len(spectra_meta_df), config.cluster_charges))
-        print(f"Spectra_mz shape:{spectra_mz.shape}, Type: {type(spectra_mz)}")
-        print(f"spectra_intensity shape:{spectra_intensity.shape}, Type: {type(spectra_intensity)}")
+        # print(f"Spectra_mz shape:{spectra_mz.shape}, Type: {type(spectra_mz)}")
+        # print(f"spectra_intensity shape:{spectra_intensity.shape}, Type: {type(spectra_intensity)}")
         ###################### 2 HD Encoding for spectra
         spectra_hvs = hd_cluster_lib.encode_spectra(
             spectra_mz=spectra_mz, spectra_intensity=spectra_intensity, config=config, logger=logger)
