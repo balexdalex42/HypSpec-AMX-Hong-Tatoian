@@ -171,8 +171,8 @@ def hd_encode_spectra_batched(spectra_intensity, spectra_mz, id_hvs, lvl_hvs, N,
         intensity_arr = torch.clamp(intensity_arr.to(torch.long), 0, Q - 1) #get indexs [0, Q-1]
 
         #array valid will have elements 0 (if not valid) or 1 (if valid)
-        lvl_batch = lvl_hvs_t[intensity_arr] * array_valid #we take away those rows by zeroing them
-
+        lvl_batch = lvl_hvs_t[intensity_arr] * array_valid[:, None]#we take away those rows by zeroing them
+    
         #now we can do our thing
         enc_hv = (id_batch * lvl_batch).sum(dim=0) #will sum up all the row vectors
 
