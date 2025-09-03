@@ -134,7 +134,7 @@ def hd_encode_spectra(spectra_intensity, spectra_mz, id_hvs, lvl_hvs, N, D, Q, o
         encoded_spectra[sample_idx] = enc_hv
 
     #now we have our complete hv batch
-    return encoded_spectra
+    return encoded_spectra.numpy()
 
 def hd_encode_spectra_batched(spectra_intensity, spectra_mz, id_hvs, lvl_hvs, N, D, Q, output_type):
     encoded_spectra = torch.zeros((N, D), dtype=torch.bfloat16)
@@ -182,7 +182,7 @@ def hd_encode_spectra_batched(spectra_intensity, spectra_mz, id_hvs, lvl_hvs, N,
         encoded_spectra[sample_idx] = enc_hv
 
     #now we have our complete hv batch
-    return encoded_spectra
+    return encoded_spectra.numpy()
 
 TPB = 32
 TPB1 = 33
@@ -229,6 +229,7 @@ def fast_pw_dist_cosine_mask_packed(A, D, prec_mz, prec_tol, N, pack_len):
 
 def calc_pw_dist(hvs, prec_mz, prec_tol, output_type, stream=None):
     # pw_dist = fast_nb_cosine_dist_mask(bucket_hv, bucket_prec_mz, config.precursor_tol[0], output_type)
+    hvs = torch.from_numpy(hvs).to(torch.bfloat16)
     N, D = hvs.shape
     # Perform AMX-accelerated matrix multiply
     dot_mat = torch.matmul(hvs, hvs.T) #accelerated matrix mult
@@ -602,7 +603,7 @@ def cluster_bucket(
         bucket_prec_mz = data_dict['prec_mz'][bucket_slice[0]: bucket_slice[1]]
         bucket_rt_time = data_dict['rt_time'][bucket_slice[0]: bucket_slice[1]]
         
-        pw_dist = fast_nb_cosine_dist_mask(bucket_hv, bucket_prec_mz, config.precursor_tol[0], output_type)
+        pw_dist = calc_pw_dist(bucket_hv, bucket_prec_mz, config.precursor_tol[0], output_type)
         cluster_func.fit(pw_dist) #
         
         cluster_labels_refined = refine_cluster(
