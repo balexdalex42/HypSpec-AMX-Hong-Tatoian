@@ -111,11 +111,11 @@ def hd_encode_spectra(spectra_intensity, spectra_mz, id_hvs, lvl_hvs, N, D, Q, o
     #turning id_hvs to matrix to access it's components better in the loop
     id_hvs_num_samples = (id_hvs.shape[0] +  D - 1) // D #should work without the D - 1 added to id_hvs
     id_hvs_t = id_hvs.reshape(id_hvs_num_samples, D)
-    id_hvs_t = torch.from_numpy(id_hvs_t).to(torch.bfloat16) #convert numpy matrix to torch so we can take advantage of AVX-512
+    id_hvs_t = torch.from_numpy(id_hvs_t.astype(np.float32)).to(torch.bfloat16) #convert numpy matrix to torch so we can take advantage of AVX-512
     #doing the same for lv_hvs
     lvl_hvs_num_samples = (lvl_hvs.shape[0] + D - 1) // D
     lvl_hvs_t = lvl_hvs.reshape(lvl_hvs_num_samples, D)
-    lvl_hvs = torch.from_numpy(lvl_hvs_t).to(torch.bfloat16)
+    lvl_hvs = torch.from_numpy(lvl_hvs_t.astype(np.float32)).to(torch.bfloat16)
     for sample_idx in range(N):
         #Get blank encoded hyper vector
         enc_hv = torch.zeros(D, dtype=torch.bfloat16)
@@ -134,7 +134,7 @@ def hd_encode_spectra(spectra_intensity, spectra_mz, id_hvs, lvl_hvs, N, D, Q, o
         encoded_spectra[sample_idx] = enc_hv
 
     #now we have our complete hv batch
-    return encoded_spectra.numpy()
+    return encoded_spectra
 
 def hd_encode_spectra_batched(spectra_intensity, spectra_mz, id_hvs, lvl_hvs, N, D, Q, output_type):
     encoded_spectra = torch.zeros((N, D), dtype=torch.bfloat16)
@@ -150,11 +150,11 @@ def hd_encode_spectra_batched(spectra_intensity, spectra_mz, id_hvs, lvl_hvs, N,
     #turning id_hvs to matrix to access it's components better in the loop
     bin_len = (id_hvs.shape[0] +  D - 1) // D #should work without the D - 1 added to id_hvs
     id_hvs_t = id_hvs.reshape(bin_len, D)
-    id_hvs_t = torch.from_numpy(id_hvs_t).to(torch.bfloat16) #convert numpy matrix to torch so we can take advantage of AVX-512
+    id_hvs_t = torch.from_numpy(id_hvs_t.astype(np.float32)).to(torch.bfloat16) #convert numpy matrix to torch so we can take advantage of AVX-512
     #doing the same for lv_hvs
     lvl_hvs_num_samples = (lvl_hvs.shape[0] +  D - 1) // D
     lvl_hvs_t = lvl_hvs.reshape(lvl_hvs_num_samples, D) #Don't need calc, Q is number of vectors in lvl_hvs
-    lvl_hvs_t = torch.from_numpy(lvl_hvs_t).to(torch.bfloat16)
+    lvl_hvs_t = torch.from_numpy(lvl_hvs_t.astype(np.float32)).to(torch.bfloat16)
     for sample_idx in range(N):
         #Get blank encoded hyper vector
         enc_hv = torch.zeros(D, dtype=torch.bfloat16)
@@ -182,7 +182,7 @@ def hd_encode_spectra_batched(spectra_intensity, spectra_mz, id_hvs, lvl_hvs, N,
         encoded_spectra[sample_idx] = enc_hv
 
     #now we have our complete hv batch
-    return encoded_spectra.numpy()
+    return encoded_spectra
 
 TPB = 32
 TPB1 = 33
@@ -229,7 +229,7 @@ def fast_pw_dist_cosine_mask_packed(A, D, prec_mz, prec_tol, N, pack_len):
 
 def calc_pw_dist(hvs, prec_mz, prec_tol, output_type, stream=None):
     # pw_dist = fast_nb_cosine_dist_mask(bucket_hv, bucket_prec_mz, config.precursor_tol[0], output_type)
-    hvs = torch.from_numpy(hvs).to(torch.bfloat16)
+    hvs = torch.from_numpy(hvs.astype(np.float32)).to(torch.bfloat16)
     N, D = hvs.shape
     # Perform AMX-accelerated matrix multiply
     dot_mat = torch.matmul(hvs, hvs.T) #accelerated matrix mult
