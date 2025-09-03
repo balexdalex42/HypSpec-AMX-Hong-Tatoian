@@ -70,6 +70,12 @@ def main(args: Union[str, List[str]] = None) -> int:
 
     #Setting which version of hd_cluster to use
     hd_cluster_lib = hd_cluster_amx if config.amx else hd_cluster
+
+    #Setting up profiler
+    profiler = cProfile.Profile()
+    profiler.enable()
+    
+    
     
     # Restore checkpoints
     spectra_meta_df, spectra_hvs = None, None
@@ -117,7 +123,12 @@ def main(args: Union[str, List[str]] = None) -> int:
         
         cluster_df = pd.concat([cluster_df, spec_df_by_charge])
 
-
+    profiler.disable()
+    
+    # Print profiling results
+    stats = pstats.Stats(profiler)
+    print("=== PROFILING RESULTS ===")
+    stats.sort_stats('cumulative').print_stats(20)
     hd_preprocess.export_cluster_results(
         spectra_df=cluster_df, config=config, logger=logger)
 
