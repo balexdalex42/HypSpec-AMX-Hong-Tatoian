@@ -92,13 +92,15 @@ def main(args: Union[str, List[str]] = None) -> int:
     cluster_df = pd.DataFrame()
     for prec_charge_i in tqdm.tqdm(config.cluster_charges):
         # Select spectra with cluster charge
-        idx = spectra_meta_df['precursor_charge']==prec_charge_i
+        idx = spectra_meta_df['precursor_charge']==prec_charge_i #we get a series
         spec_df_by_charge = spectra_meta_df.loc[idx]
 
         logger.info("Start clustering Charge {} with {} spectra".format(prec_charge_i, len(spec_df_by_charge)))
-        
+        # we need to make sure we get row hypervectors we need, good thing we have the indexes spec_df_by_charge
+        idx_indices = spec_df_by_charge.tolist()
+        selected_hvs = [spectra_hvs[i] for i in idx_indices]
         cluster_labels_per_charge, cluster_representatives_per_charge = hd_cluster_lib.cluster_spectra(
-            spectra_by_charge_df=spec_df_by_charge, encoded_spectra_hv=spectra_hvs[idx.to_numpy()],
+            spectra_by_charge_df=spec_df_by_charge, encoded_spectra_hv=selected_hvs,
             config=config, logger=logger)
 
         spec_df_by_charge = spec_df_by_charge.assign(
