@@ -75,8 +75,7 @@ def main(args: Union[str, List[str]] = None) -> int:
         ###################### 1. Load and parse spectra files
         spectra_meta_df, spectra_mz, spectra_intensity = hd_preprocess.load_process_spectra_parallel(config=config, logger=logger)
         logger.info("Preserve {} spectra for cluster charges: {}".format(len(spectra_meta_df), config.cluster_charges))
-        # print(f"Spectra_mz shape:{spectra_mz.shape}, Type: {type(spectra_mz)}")
-        # print(f"spectra_intensity shape:{spectra_intensity.shape}, Type: {type(spectra_intensity)}")
+
         ###################### 2 HD Encoding for spectra
         spectra_hvs = hd_cluster_lib.encode_spectra(
             spectra_mz=spectra_mz, spectra_intensity=spectra_intensity, config=config, logger=logger)
@@ -97,7 +96,7 @@ def main(args: Union[str, List[str]] = None) -> int:
 
         logger.info("Start clustering Charge {} with {} spectra".format(prec_charge_i, len(spec_df_by_charge)))
         # we need to make sure we get row hypervectors we need, good thing we have the indexes spec_df_by_charge
-        idx_indices = spec_df_by_charge.tolist()
+        idx_indices = spec_df_by_charge.index.tolist()
         selected_hvs = [spectra_hvs[i] for i in idx_indices]
         cluster_labels_per_charge, cluster_representatives_per_charge = hd_cluster_lib.cluster_spectra(
             spectra_by_charge_df=spec_df_by_charge, encoded_spectra_hv=selected_hvs,
