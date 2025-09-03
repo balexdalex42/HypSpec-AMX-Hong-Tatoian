@@ -98,7 +98,7 @@ def main(args: Union[str, List[str]] = None) -> int:
         logger.info("Start clustering Charge {} with {} spectra".format(prec_charge_i, len(spec_df_by_charge)))
         
         cluster_labels_per_charge, cluster_representatives_per_charge = hd_cluster_lib.cluster_spectra(
-            spectra_by_charge_df=spec_df_by_charge, encoded_spectra_hv=spectra_hvs[idx],
+            spectra_by_charge_df=spec_df_by_charge, encoded_spectra_hv=spectra_hvs[idx.to_numpy],
             config=config, logger=logger)
 
         spec_df_by_charge = spec_df_by_charge.assign(
