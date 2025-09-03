@@ -186,6 +186,7 @@ def gen_lv_id_hvs(
 #         return encoded_spectra.reshape(N, packed_dim).get()
 #     elif output_type=='cupy':
 #         return encoded_spectra.reshape(N, packed_dim)
+    
 @nb.njit(parallel=True)
 def nb_bit_packing(orig_vecs, N, D):
     pack_len = (D + 31) // 32
