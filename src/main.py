@@ -91,10 +91,17 @@ def main(args: Union[str, List[str]] = None) -> int:
         ###################### 2 HD Encoding for spectra
         spectra_hvs = hd_cluster_lib.encode_spectra(
             spectra_mz=spectra_mz, spectra_intensity=spectra_intensity, config=config, logger=logger)
+         
+        # Print profiling results
+        profiler.disable()
+   
+        stats = pstats.Stats(profiler)
+        print("=== PROFILING RESULTS for PreProcessing and Encoding===")
+        stats.sort_stats('cumulative').print_stats(20)
 
         # Save meta and encoding data
         if config.checkpoint:
-            spectra_hvs_numpy = np.array([tensor.numpy() for tensor in spectra_hvs], dtype=np.float32)
+            spectra_hvs_numpy = [tensor.numpy(dtype=np.float32) for tensor in spectra_hvs] #put a casted version of each hv matrix
             hd_preprocess.save_checkpoint(
                 spectra_meta=spectra_meta_df, spectra_hvs=spectra_hvs_numpy, 
                 config=config, logger=logger)
@@ -106,13 +113,14 @@ def main(args: Union[str, List[str]] = None) -> int:
         # Select spectra with cluster charge
         idx = spectra_meta_df['precursor_charge']==prec_charge_i #we get a series
         spec_df_by_charge = spectra_meta_df.loc[idx]
-        print(f"spec_df_by_charge: {spec_df_by_charge}")
+        # print(f"spec_df_by_charge: {spec_df_by_charge}")
 
         logger.info("Start clustering Charge {} with {} spectra".format(prec_charge_i, len(spec_df_by_charge)))
         # we need to make sure we get row hypervectors we need, good thing we have the indexes spec_df_by_charge
         idx_indices = spec_df_by_charge.index.tolist()
-        print(f"idx_indices: {idx_indices}")
+        # print(f"idx_indices: {idx_indices}")
         selected_hvs = [spectra_hvs[i] for i in idx_indices]
+        # print(f"Shape survey:{selected_hvs[0].shape}")
         cluster_labels_per_charge, cluster_representatives_per_charge = hd_cluster_lib.cluster_spectra(
             spectra_by_charge_df=spec_df_by_charge, encoded_spectra_hv=selected_hvs,
             config=config, logger=logger)
@@ -123,12 +131,8 @@ def main(args: Union[str, List[str]] = None) -> int:
         
         cluster_df = pd.concat([cluster_df, spec_df_by_charge])
 
-    profiler.disable()
-    
-    # Print profiling results
-    stats = pstats.Stats(profiler)
-    print("=== PROFILING RESULTS ===")
-    stats.sort_stats('cumulative').print_stats(20)
+   
+
     hd_preprocess.export_cluster_results(
         spectra_df=cluster_df, config=config, logger=logger)
 

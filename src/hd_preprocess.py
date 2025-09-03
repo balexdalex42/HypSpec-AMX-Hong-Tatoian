@@ -41,7 +41,11 @@ def load_checkpoint(
     spectra_hvs = None
     if os.path.exists(ckp_hvs_file):
         with open(ckp_hvs_file, 'rb') as f:
-            spectra_hvs = np.load(f)
+            npz_file = np.load(f) #loading file
+            if hasattr(npz_file, 'files'):  # It's an .npz file
+                spectra_hvs = [npz_file[f'arr_{i}'] for i in range(len(npz_file.files))]
+            else:  # It's a single .npy array
+                spectra_hvs = [npz_file]  # Wrap in list for consistency
  
     if (spectra_meta_df is not None) and (spectra_hvs is not None):
         logger.info("Successfully restored checkpoints from {} and {}!".format(ckp_parquet_file, ckp_hvs_file))
@@ -53,7 +57,7 @@ def load_checkpoint(
 
 def save_checkpoint(
     spectra_meta: pd.DataFrame,
-    spectra_hvs: np.ndarray,
+    spectra_hvs: list,
     config: Config,
     logger: logging
     ):
@@ -73,7 +77,7 @@ def save_checkpoint(
 
     spectra_meta.to_parquet(ckp_parquet_file, compression='snappy', index=False)
     with open(ckp_hvs_file, 'wb') as f:
-        np.save(f, spectra_hvs)
+        np.savez(f, *spectra_hvs) #need to unpack each spectra_hvs matrix and store in file
  
     logger.info("Save spectra metadata to: {} and encoded spectra to: {}".format(ckp_parquet_file, ckp_hvs_file))
     

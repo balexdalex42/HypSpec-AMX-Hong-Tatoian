@@ -704,13 +704,14 @@ def hcluster_par_bucket(
 
 def cluster_spectra(
     spectra_by_charge_df: pd.DataFrame,
-    encoded_spectra_hv: np.ndarray,
+    encoded_spectra_hv: list,
     config: Config,
     logger: logging
 ):
     # Save data to shared memory
     start = time.time()
     
+
     data_dict = {
         'hv': encoded_spectra_hv, 
         'prec_mz': np.vstack(spectra_by_charge_df.precursor_mz).astype(np.float32),
